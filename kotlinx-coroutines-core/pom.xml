@@ -32,6 +32,15 @@
         <kotlin.compiler.jdkHome>${env.JDK_16}</kotlin.compiler.jdkHome>
     </properties>
 
+    <dependencies>
+        <dependency>
+            <groupId>com.devexperts.lincheck</groupId>
+            <artifactId>core</artifactId>
+            <version>1.7</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
         <sourceDirectory>src/main/kotlin</sourceDirectory>
         <testSourceDirectory>src/test/kotlin</testSourceDirectory>

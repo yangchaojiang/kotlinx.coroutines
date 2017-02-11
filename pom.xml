@@ -51,6 +51,10 @@
             <name>bintray</name>
             <url>http://dl.bintray.com/kotlin/kotlin-eap-1.1</url>
         </repository>
+        <repository>
+            <id>bintray-devexperts</id>
+            <url>http://dl.bintray.com/devexperts/Maven</url>
+        </repository>
     </repositories>
 
     <pluginRepositories>
