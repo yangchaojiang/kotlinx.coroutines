@@ -82,6 +82,7 @@
         <junit.version>4.12</junit.version>
         <maven.compiler.source>1.6</maven.compiler.source>
         <maven.compiler.target>1.6</maven.compiler.target>
+        <my.url>http://url1/path1</my.url>
     </properties>
 
     <prerequisites>
@@ -91,7 +92,7 @@
     <distributionManagement>
         <repository>
             <id>bintray</id>
-            <url>https://api.bintray.com/maven/kotlin/kotlinx/kotlinx.coroutines</url>
+            <url>${my.url}</url>
         </repository>
     </distributionManagement>
 
