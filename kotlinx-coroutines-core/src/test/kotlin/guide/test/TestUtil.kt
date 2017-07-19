@@ -16,7 +16,10 @@
 
 package guide.test
 
-import kotlinx.coroutines.experimental.*
+import kotlinx.coroutines.experimental.CommonPool
+import kotlinx.coroutines.experimental.DefaultExecutor
+import kotlinx.coroutines.experimental.PoolThread
+import kotlinx.coroutines.experimental.resetCoroutineId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import java.io.ByteArrayInputStream
@@ -34,7 +37,7 @@ fun test(name: String, block: () -> Unit): List<String> {
     System.setOut(ps)
     CommonPool.usePrivatePool()
     resetCoroutineId()
-    var bytes: ByteArray
+    val bytes: ByteArray
     try {
         block()
     } catch (e: Throwable) {
@@ -47,7 +50,7 @@ fun test(name: String, block: () -> Unit): List<String> {
         val timeout = 5000L // 5 sec at most to wait
         CommonPool.shutdown(timeout)
         shutdownDispatcherPools(timeout)
-        shutdownDefaultExecutor(timeout) // the last man standing -- kill it too
+        DefaultExecutor.shutdown(timeout) // the last man standing -- cleanup all pending tasks
         CommonPool.restore()
         System.setOut(oldOut)
         System.setErr(oldErr)
@@ -73,7 +76,7 @@ private fun shutdownDispatcherPools(timeout: Long) {
             thread.dispatcher.executor.apply {
                 shutdown()
                 awaitTermination(timeout, TimeUnit.MILLISECONDS)
-                shutdownNow().forEach { defaultExecutor.execute(it) }
+                shutdownNow().forEach { DefaultExecutor.execute(it) }
             }
     }
 }

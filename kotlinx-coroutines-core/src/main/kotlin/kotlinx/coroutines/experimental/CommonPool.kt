@@ -61,7 +61,7 @@ object CommonPool : CoroutineDispatcher() {
 
     override fun dispatch(context: CoroutineContext, block: Runnable) =
         try { (_pool ?: getOrCreatePoolSync()).execute(block) }
-        catch (e: RejectedExecutionException) { defaultExecutor.execute(block) }
+        catch (e: RejectedExecutionException) { DefaultExecutor.execute(block) }
 
     // used for tests
     @Synchronized
@@ -78,7 +78,7 @@ object CommonPool : CoroutineDispatcher() {
             shutdown()
             if (timeout > 0)
                 awaitTermination(timeout, TimeUnit.MILLISECONDS)
-            shutdownNow().forEach { defaultExecutor.execute(it) }
+            shutdownNow().forEach { DefaultExecutor.execute(it) }
         }
         _pool = Executor { throw RejectedExecutionException("CommonPool was shutdown") }
     }
