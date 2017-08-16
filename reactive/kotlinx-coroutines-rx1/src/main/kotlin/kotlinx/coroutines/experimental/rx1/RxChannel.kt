@@ -59,8 +59,7 @@ public operator fun <T> Observable<T>.iterator() = openSubscription().iterator()
 /**
  * Subscribes to this [Observable] and performs the specified action for each received element.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> Observable<T>.consumeEach(action: suspend (T) -> Unit) {
+public inline suspend fun <T> Observable<T>.consumeEach(action: (T) -> Unit) {
     openSubscription().use { channel ->
         for (x in channel) action(x)
     }

@@ -114,8 +114,7 @@ public fun Mutex(locked: Boolean = false): Mutex = MutexImpl(locked)
  *
  * @return the return value of the action.
  */
-// :todo: this function needs to be make inline as soon as this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> Mutex.withLock(owner: Any? = null, action: suspend () -> T): T {
+public inline suspend fun <T> Mutex.withLock(owner: Any? = null, action: () -> T): T {
     lock(owner)
     try {
         return action()
@@ -128,20 +127,13 @@ public suspend fun <T> Mutex.withLock(owner: Any? = null, action: suspend () -> 
  * @suppress: **Deprecated**: Use [withLock]
  */
 @Deprecated("Use `withLock(owner, action)", level = DeprecationLevel.HIDDEN)
-public suspend fun <T> Mutex.withLock(action: suspend () -> T): T = withLock(null, action)
+public suspend fun <T> Mutex.withLock(action: suspend () -> T): T = withLock { action() }
 
 /**
  * @suppress: **Deprecated**: Use [withLock]
  */
 @Deprecated("Use `withLock`", replaceWith = ReplaceWith("withLock(action)"))
-public suspend fun <T> Mutex.withMutex(action: suspend () -> T): T {
-    lock()
-    try {
-        return action()
-    } finally {
-        unlock()
-    }
-}
+public suspend fun <T> Mutex.withMutex(action: suspend () -> T): T  = withLock { action() }
 
 private val LOCK_FAIL = Symbol("LOCK_FAIL")
 private val ENQUEUE_FAIL = Symbol("ENQUEUE_FAIL")

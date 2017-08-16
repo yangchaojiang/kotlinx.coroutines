@@ -71,8 +71,7 @@ public operator fun <T> ObservableSource<T>.iterator() = openSubscription().iter
 /**
  * Subscribes to this [MaybeSource] and performs the specified action for each received element.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> MaybeSource<T>.consumeEach(action: suspend (T) -> Unit) {
+public inline suspend fun <T> MaybeSource<T>.consumeEach(action: (T) -> Unit) {
     openSubscription().use { channel ->
         for (x in channel) action(x)
     }
@@ -81,8 +80,7 @@ public suspend fun <T> MaybeSource<T>.consumeEach(action: suspend (T) -> Unit) {
 /**
  * Subscribes to this [ObservableSource] and performs the specified action for each received element.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ObservableSource<T>.consumeEach(action: suspend (T) -> Unit) {
+public inline suspend fun <T> ObservableSource<T>.consumeEach(action: (T) -> Unit) {
     openSubscription().use { channel ->
         for (x in channel) action(x)
     }

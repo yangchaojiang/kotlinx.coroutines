@@ -58,8 +58,7 @@ public operator fun <T> Publisher<T>.iterator() = openSubscription().iterator()
 /**
  * Subscribes to this [Publisher] and performs the specified action for each received element.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> Publisher<T>.consumeEach(action: suspend (T) -> Unit) {
+public inline suspend fun <T> Publisher<T>.consumeEach(action: (T) -> Unit) {
     openSubscription().use { channel ->
         for (x in channel) action(x)
     }
