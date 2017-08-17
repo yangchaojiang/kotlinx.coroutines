@@ -22,7 +22,6 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChannelsTest {
-
     private val testList = listOf(1, 2, 3)
 
     @Test
@@ -32,7 +31,7 @@ class ChannelsTest {
 
     @Test
     fun testAsSequence() {
-        assertEquals(testList, testList.asReceiveChannel().asSequence().toList())
+        assertEquals(testList, testList.asReceiveChannel().asBlockingSequence().toList())
     }
 
     @Test
@@ -49,7 +48,7 @@ class ChannelsTest {
             fail()
         }
         val take2 = numbers
-                .asSequence()
+                .asBlockingSequence()
                 .take(2)
                 .toList()
 
@@ -185,13 +184,6 @@ class ChannelsTest {
     @Test
     fun testPartition() = runBlocking {
         assertEquals(testList.partition { it % 2 == 0 }, testList.asReceiveChannel().partition { it % 2 == 0 })
-    }
-
-    @Test
-    fun testSendTo() = runBlocking {
-        val other = mutableListOf<Int>()
-        testList.asReceiveChannel().sendTo(other.asSendChannel())
-        assertEquals(testList, other)
     }
 
     @Test

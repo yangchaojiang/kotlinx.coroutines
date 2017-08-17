@@ -16,7 +16,6 @@
 
 package kotlinx.coroutines.experimental.channels
 
-import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.Unconfined
 import kotlinx.coroutines.experimental.runBlocking
 import kotlin.coroutines.experimental.CoroutineContext
@@ -24,25 +23,27 @@ import kotlin.coroutines.experimental.CoroutineContext
 internal const val DEFAULT_CLOSE_MESSAGE = "Channel was closed"
 
 /**
- * Creates a [ProducerJob] to read all element of the [Iterable].
+ * Returns a channel to read all element of the [Iterable].
  */
-public fun <E> Iterable<E>.asReceiveChannel(context: CoroutineContext = Unconfined): ReceiveChannel<E> = produce(context) {
-    for (element in this@asReceiveChannel)
-        send(element)
-}
+public fun <E> Iterable<E>.asReceiveChannel(context: CoroutineContext = Unconfined): ReceiveChannel<E> =
+    produce(context) {
+        for (element in this@asReceiveChannel)
+            send(element)
+    }
 
 /**
- * Creates an [ActorJob] to insert elements in this [MutableCollection].
+ * Returns a channel to read all element of the [Sequence].
  */
-public fun <E> MutableCollection<E>.asSendChannel(context: CoroutineContext = Unconfined): SendChannel<E> = actor(context) {
-    for (element in channel)
-        this@asSendChannel += element
-}
+public fun <E> Sequence<E>.asReceiveChannel(context: CoroutineContext = Unconfined): ReceiveChannel<E> =
+    produce(context) {
+        for (element in this@asReceiveChannel)
+            send(element)
+    }
 
 /**
  * Creates a [Sequence] instance that wraps the original [ReceiveChannel] returning its entries when being emitted.
  */
-public fun <E : Any> ReceiveChannel<E>.asSequence(): Sequence<E> =
+public fun <E : Any> ReceiveChannel<E>.asBlockingSequence(): Sequence<E> =
         generateSequence {
             runBlocking {
                 receiveOrNull()
@@ -82,8 +83,7 @@ public suspend fun <E> BroadcastChannel<E>.consumeEach(action: suspend (E) -> Un
 /**
  * Performs the given [action] for each received element.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <E> ReceiveChannel<E>.consumeEachIndexed(action: suspend (IndexedValue<E>) -> Unit) {
+public inline suspend fun <E> ReceiveChannel<E>.consumeEachIndexed(action: (IndexedValue<E>) -> Unit) {
     var index = 0
     for (element in this) action(IndexedValue(index++, element))
 }
@@ -109,16 +109,15 @@ public suspend fun <T : Any?, E : T> ReceiveChannel<E>.drainTo(destination: Muta
  *
  * The operation is _terminal_.
  */
-public suspend fun <T> ReceiveChannel<T>.elementAt(index: Int): T {
-    return elementAtOrElse(index) { throw IndexOutOfBoundsException("ReceiveChannel doesn't contain element at index $index.") }
-}
+public suspend fun <T> ReceiveChannel<T>.elementAt(index: Int): T =
+    elementAtOrElse(index) { throw IndexOutOfBoundsException("ReceiveChannel doesn't contain element at index $index.") }
 
 /**
  * Returns an element at the given [index] or the result of calling the [defaultValue] function if the [index] is out of bounds of this channel.
  *
  * The operation is _terminal_.
  */
-public suspend fun <T> ReceiveChannel<T>.elementAtOrElse(index: Int, defaultValue: suspend (Int) -> T): T {
+public inline suspend fun <T> ReceiveChannel<T>.elementAtOrElse(index: Int, defaultValue: (Int) -> T): T {
     if (index < 0)
         return defaultValue(index)
     var count = 0
@@ -150,20 +149,16 @@ public suspend fun <T> ReceiveChannel<T>.elementAtOrNull(index: Int): T? {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.find(predicate: suspend (T) -> Boolean): T? {
-    return firstOrNull(predicate)
-}
+public inline suspend fun <T> ReceiveChannel<T>.find(predicate: (T) -> Boolean): T? =
+    firstOrNull(predicate)
 
 /**
  * Returns the last element matching the given [predicate], or `null` if no such element was found.
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.findLast(predicate: suspend (T) -> Boolean): T? {
-    return lastOrNull(predicate)
-}
+public inline suspend fun <T> ReceiveChannel<T>.findLast(predicate: (T) -> Boolean): T? =
+    lastOrNull(predicate)
 
 /**
  * Returns first element.
@@ -184,8 +179,7 @@ public suspend fun <T> ReceiveChannel<T>.first(): T {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.first(predicate: suspend (T) -> Boolean): T {
+public inline suspend fun <T> ReceiveChannel<T>.first(predicate: (T) -> Boolean): T {
     for (element in this) if (predicate(element)) return element
     throw NoSuchElementException("ReceiveChannel contains no element matching the predicate.")
 }
@@ -207,8 +201,7 @@ public suspend fun <T> ReceiveChannel<T>.firstOrNull(): T? {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.firstOrNull(predicate: suspend (T) -> Boolean): T? {
+public inline suspend fun <T> ReceiveChannel<T>.firstOrNull(predicate: (T) -> Boolean): T? {
     for (element in this) if (predicate(element)) return element
     return null
 }
@@ -233,8 +226,7 @@ public suspend fun <T> ReceiveChannel<T>.indexOf(element: T): Int {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.indexOfFirst(predicate: suspend (T) -> Boolean): Int {
+public inline suspend fun <T> ReceiveChannel<T>.indexOfFirst(predicate: (T) -> Boolean): Int {
     var index = 0
     for (item in this) {
         if (predicate(item))
@@ -249,8 +241,7 @@ public suspend fun <T> ReceiveChannel<T>.indexOfFirst(predicate: suspend (T) -> 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.indexOfLast(predicate: suspend (T) -> Boolean): Int {
+public inline suspend fun <T> ReceiveChannel<T>.indexOfLast(predicate: (T) -> Boolean): Int {
     var lastIndex = -1
     var index = 0
     for (item in this) {
@@ -283,8 +274,7 @@ public suspend fun <T> ReceiveChannel<T>.last(): T {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.last(predicate: suspend (T) -> Boolean): T {
+public inline suspend fun <T> ReceiveChannel<T>.last(predicate: (T) -> Boolean): T {
     var last: T? = null
     var found = false
     for (element in this) {
@@ -334,8 +324,7 @@ public suspend fun <T> ReceiveChannel<T>.lastOrNull(): T? {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.lastOrNull(predicate: suspend (T) -> Boolean): T? {
+public inline suspend fun <T> ReceiveChannel<T>.lastOrNull(predicate: (T) -> Boolean): T? {
     var last: T? = null
     for (element in this) {
         if (predicate(element)) {
@@ -365,8 +354,7 @@ public suspend fun <T> ReceiveChannel<T>.single(): T {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.single(predicate: suspend (T) -> Boolean): T {
+public inline suspend fun <T> ReceiveChannel<T>.single(predicate: (T) -> Boolean): T {
     var single: T? = null
     var found = false
     for (element in this) {
@@ -401,8 +389,7 @@ public suspend fun <T> ReceiveChannel<T>.singleOrNull(): T? {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.singleOrNull(predicate: suspend (T) -> Boolean): T? {
+public inline suspend fun <T> ReceiveChannel<T>.singleOrNull(predicate: (T) -> Boolean): T? {
     var single: T? = null
     var found = false
     for (element in this) {
@@ -421,46 +408,51 @@ public suspend fun <T> ReceiveChannel<T>.singleOrNull(predicate: suspend (T) -> 
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.drop(n: Int): ReceiveChannel<T> = produce(CommonPool) {
-    require(n >= 0) { "Requested element count $n is less than zero." }
-    var remaining: Int = n
-    if (remaining > 0)
+public suspend fun <T> ReceiveChannel<T>.drop(n: Int, context: CoroutineContext = Unconfined): ReceiveChannel<T> =
+    produce(context) {
+        require(n >= 0) { "Requested element count $n is less than zero." }
+        var remaining: Int = n
+        if (remaining > 0)
+            for (element in this@drop) {
+                remaining--
+                if (remaining == 0)
+                    break
+            }
         for (element in this@drop) {
-            remaining--
-            if (remaining == 0)
-                break
+            send(element)
         }
-    for (element in this@drop) {
-        send(element)
     }
-}
 
 /**
  * Returns a channel containing all elements except first elements that satisfy the given [predicate].
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.dropWhile(predicate: suspend (T) -> Boolean): ReceiveChannel<T> = produce(Unconfined) {
-    for (element in this@dropWhile) {
-        if (!predicate(element))
-            break
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T> ReceiveChannel<T>.dropWhile(context: CoroutineContext = Unconfined, predicate: suspend (T) -> Boolean): ReceiveChannel<T> =
+    produce(context) {
+        for (element in this@dropWhile) {
+            if (!predicate(element))
+                break
+        }
+        for (element in this@dropWhile) {
+            send(element)
+        }
     }
-    for (element in this@dropWhile) {
-        send(element)
-    }
-}
 
 /**
  * Returns a channel containing only elements matching the given [predicate].
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.filter(predicate: suspend (T) -> Boolean): ReceiveChannel<T> = produce(Unconfined) {
-    for (element in this@filter) {
-        if (predicate(element))
-            send(element)
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T> ReceiveChannel<T>.filter(context: CoroutineContext = Unconfined, predicate: suspend (T) -> Boolean): ReceiveChannel<T> =
+    produce(context) {
+        for (element in this@filter) {
+            if (predicate(element))
+                send(element)
+        }
     }
-}
 
 /**
  * Returns a channel containing only elements matching the given [predicate].
@@ -469,13 +461,15 @@ public suspend fun <T> ReceiveChannel<T>.filter(predicate: suspend (T) -> Boolea
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.filterIndexed(predicate: suspend (index: Int, T) -> Boolean): ReceiveChannel<T> = produce(Unconfined) {
-    var index = 0
-    for (element in this@filterIndexed) {
-        if (predicate(index++, element))
-            send(element)
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T> ReceiveChannel<T>.filterIndexed(context: CoroutineContext = Unconfined, predicate: suspend (index: Int, T) -> Boolean): ReceiveChannel<T> =
+    produce(context) {
+        var index = 0
+        for (element in this@filterIndexed) {
+            if (predicate(index++, element))
+                send(element)
+        }
     }
-}
 
 /**
  * Appends all elements matching the given [predicate] to the given [destination].
@@ -484,7 +478,7 @@ public suspend fun <T> ReceiveChannel<T>.filterIndexed(predicate: suspend (index
  *
  * The operation is _terminal_.
  */
-public suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterIndexedTo(destination: C, predicate: suspend (index: Int, T) -> Boolean): C {
+public inline suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterIndexedTo(destination: C, predicate: (index: Int, T) -> Boolean): C {
     consumeEachIndexed { (index, element) ->
         if (predicate(index, element)) destination.add(element)
     }
@@ -496,8 +490,9 @@ public suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterInde
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.filterNot(predicate: suspend (T) -> Boolean): ReceiveChannel<T> = filter() { !predicate(it) }
-
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T> ReceiveChannel<T>.filterNot(predicate: suspend (T) -> Boolean): ReceiveChannel<T> =
+    filter { !predicate(it) }
 
 /**
  * Returns a channel containing all elements that are not `null`.
@@ -505,7 +500,8 @@ public suspend fun <T> ReceiveChannel<T>.filterNot(predicate: suspend (T) -> Boo
  * The operation is _intermediate_ and _stateless_.
  */
 @Suppress("UNCHECKED_CAST")
-public suspend fun <T : Any> ReceiveChannel<T?>.filterNotNull(): ReceiveChannel<T> = filter { it != null } as ReceiveChannel<T>
+public suspend fun <T : Any> ReceiveChannel<T?>.filterNotNull(): ReceiveChannel<T> =
+    filter { it != null } as ReceiveChannel<T>
 
 /**
  * Appends all elements that are not `null` to the given [destination].
@@ -522,8 +518,7 @@ public suspend fun <C : MutableCollection<in T>, T : Any> ReceiveChannel<T?>.fil
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterNotTo(destination: C, predicate: suspend (T) -> Boolean): C {
+public inline suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterNotTo(destination: C, predicate: (T) -> Boolean): C {
     for (element in this) if (!predicate(element)) destination.add(element)
     return destination
 }
@@ -533,8 +528,7 @@ public suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterNotT
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterTo(destination: C, predicate: suspend (T) -> Boolean): C {
+public inline suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterTo(destination: C, predicate: (T) -> Boolean): C {
     for (element in this) if (predicate(element)) destination.add(element)
     return destination
 }
@@ -544,30 +538,33 @@ public suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.filterTo(d
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.take(n: Int): ReceiveChannel<T> = produce(CommonPool) {
-    if (n == 0) return@produce
-    require(n >= 0) { "Requested element count $n is less than zero." }
+public suspend fun <T> ReceiveChannel<T>.take(n: Int, context: CoroutineContext = Unconfined): ReceiveChannel<T> =
+    produce(context) {
+        if (n == 0) return@produce
+        require(n >= 0) { "Requested element count $n is less than zero." }
 
-    var remaining: Int = n
-    for (element in this@take) {
-        send(element)
-        remaining--
-        if (remaining == 0)
-            return@produce
+        var remaining: Int = n
+        for (element in this@take) {
+            send(element)
+            remaining--
+            if (remaining == 0)
+                return@produce
+        }
     }
-}
 
 /**
  * Returns a channel containing first elements satisfying the given [predicate].
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.takeWhile(predicate: suspend (T) -> Boolean): ReceiveChannel<T> = produce(Unconfined) {
-    for (element in this@takeWhile) {
-        if (!predicate(element)) return@produce
-        send(element)
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T> ReceiveChannel<T>.takeWhile(context: CoroutineContext = Unconfined, predicate: suspend (T) -> Boolean): ReceiveChannel<T> =
+    produce(context) {
+        for (element in this@takeWhile) {
+            if (!predicate(element)) return@produce
+            send(element)
+        }
     }
-}
 
 /**
  * Returns a [Map] containing key-value pairs provided by [transform] function
@@ -579,10 +576,8 @@ public suspend fun <T> ReceiveChannel<T>.takeWhile(predicate: suspend (T) -> Boo
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, V> ReceiveChannel<T>.associate(transform: suspend (T) -> Pair<K, V>): Map<K, V> {
-    return associateTo(LinkedHashMap<K, V>(), transform)
-}
+public inline suspend fun <T, K, V> ReceiveChannel<T>.associate(transform: (T) -> Pair<K, V>): Map<K, V> =
+    associateTo(LinkedHashMap<K, V>(), transform)
 
 /**
  * Returns a [Map] containing the elements from the given channel indexed by the key
@@ -594,10 +589,8 @@ public suspend fun <T, K, V> ReceiveChannel<T>.associate(transform: suspend (T) 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K> ReceiveChannel<T>.associateBy(keySelector: suspend (T) -> K): Map<K, T> {
-    return associateByTo(LinkedHashMap<K, T>(), keySelector)
-}
+public inline suspend fun <T, K> ReceiveChannel<T>.associateBy(keySelector: (T) -> K): Map<K, T> =
+    associateByTo(LinkedHashMap<K, T>(), keySelector)
 
 /**
  * Returns a [Map] containing the values provided by [valueTransform] and indexed by [keySelector] functions applied to elements of the given channel.
@@ -608,10 +601,8 @@ public suspend fun <T, K> ReceiveChannel<T>.associateBy(keySelector: suspend (T)
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, V> ReceiveChannel<T>.associateBy(keySelector: suspend (T) -> K, valueTransform: suspend (T) -> V): Map<K, V> {
-    return associateByTo(LinkedHashMap<K, V>(), keySelector, valueTransform)
-}
+public inline suspend fun <T, K, V> ReceiveChannel<T>.associateBy(keySelector: (T) -> K, valueTransform: (T) -> V): Map<K, V> =
+    associateByTo(LinkedHashMap<K, V>(), keySelector, valueTransform)
 
 /**
  * Populates and returns the [destination] mutable map with key-value pairs,
@@ -622,8 +613,7 @@ public suspend fun <T, K, V> ReceiveChannel<T>.associateBy(keySelector: suspend 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, M : MutableMap<in K, in T>> ReceiveChannel<T>.associateByTo(destination: M, keySelector: suspend (T) -> K): M {
+public inline suspend fun <T, K, M : MutableMap<in K, in T>> ReceiveChannel<T>.associateByTo(destination: M, keySelector: (T) -> K): M {
     for (element in this) {
         destination.put(keySelector(element), element)
     }
@@ -639,8 +629,7 @@ public suspend fun <T, K, M : MutableMap<in K, in T>> ReceiveChannel<T>.associat
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, V, M : MutableMap<in K, in V>> ReceiveChannel<T>.associateByTo(destination: M, keySelector: suspend (T) -> K, valueTransform: suspend (T) -> V): M {
+public inline suspend fun <T, K, V, M : MutableMap<in K, in V>> ReceiveChannel<T>.associateByTo(destination: M, keySelector: (T) -> K, valueTransform: (T) -> V): M {
     for (element in this) {
         destination.put(keySelector(element), valueTransform(element))
     }
@@ -655,8 +644,7 @@ public suspend fun <T, K, V, M : MutableMap<in K, in V>> ReceiveChannel<T>.assoc
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, V, M : MutableMap<in K, in V>> ReceiveChannel<T>.associateTo(destination: M, transform: suspend (T) -> Pair<K, V>): M {
+public inline suspend fun <T, K, V, M : MutableMap<in K, in V>> ReceiveChannel<T>.associateTo(destination: M, transform: (T) -> Pair<K, V>): M {
     for (element in this) {
         destination += transform(element)
     }
@@ -680,18 +668,16 @@ public suspend fun <T, C : MutableCollection<in T>> ReceiveChannel<T>.toCollecti
  *
  * The operation is _terminal_.
  */
-public suspend fun <T> ReceiveChannel<T>.toList(): List<T> {
-    return this.toMutableList()
-}
+public suspend fun <T> ReceiveChannel<T>.toList(): List<T> =
+    this.toMutableList()
 
 /**
  * Returns a [Map] filled with all elements of this channel.
  *
  * The operation is _terminal_.
  */
-public suspend fun <K, V> ReceiveChannel<Pair<K, V>>.toMap(): Map<K, V> {
-    return toMap(LinkedHashMap<K, V>())
-}
+public suspend fun <K, V> ReceiveChannel<Pair<K, V>>.toMap(): Map<K, V> =
+    toMap(LinkedHashMap<K, V>())
 
 /**
  * Returns a [MutableMap] filled with all elements of this channel.
@@ -710,9 +696,8 @@ public suspend fun <K, V, M : MutableMap<in K, in V>> ReceiveChannel<Pair<K, V>>
  *
  * The operation is _terminal_.
  */
-public suspend fun <T> ReceiveChannel<T>.toMutableList(): MutableList<T> {
-    return toCollection(ArrayList<T>())
-}
+public suspend fun <T> ReceiveChannel<T>.toMutableList(): MutableList<T> =
+    toCollection(ArrayList<T>())
 
 /**
  * Returns a [Set] of all elements.
@@ -721,22 +706,23 @@ public suspend fun <T> ReceiveChannel<T>.toMutableList(): MutableList<T> {
  *
  * The operation is _terminal_.
  */
-public suspend fun <T> ReceiveChannel<T>.toSet(): Set<T> {
-    return toCollection(LinkedHashSet<T>())
-}
+public suspend fun <T> ReceiveChannel<T>.toSet(): Set<T> =
+    toCollection(LinkedHashSet<T>())
 
 /**
  * Returns a single channel of all elements from results of [transform] function being invoked on each element of original channel.
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T, R> ReceiveChannel<T>.flatMap(transform: suspend (T) -> ReceiveChannel<R>): ReceiveChannel<R> = produce(Unconfined) {
-    for (element in this@flatMap) {
-        for (sub in transform(element)) {
-            send(sub)
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T, R> ReceiveChannel<T>.flatMap(context: CoroutineContext = Unconfined, transform: suspend (T) -> ReceiveChannel<R>): ReceiveChannel<R> =
+    produce(context) {
+        for (element in this@flatMap) {
+            for (sub in transform(element)) {
+                send(sub)
+            }
         }
     }
-}
 
 /**
  * Groups elements of the original channel by the key returned by the given [keySelector] function
@@ -746,10 +732,8 @@ public suspend fun <T, R> ReceiveChannel<T>.flatMap(transform: suspend (T) -> Re
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K> ReceiveChannel<T>.groupBy(keySelector: suspend (T) -> K): Map<K, List<T>> {
-    return groupByTo(LinkedHashMap<K, MutableList<T>>(), keySelector)
-}
+public inline suspend fun <T, K> ReceiveChannel<T>.groupBy(keySelector: (T) -> K): Map<K, List<T>> =
+    groupByTo(LinkedHashMap<K, MutableList<T>>(), keySelector)
 
 /**
  * Groups values returned by the [valueTransform] function applied to each element of the original channel
@@ -760,10 +744,8 @@ public suspend fun <T, K> ReceiveChannel<T>.groupBy(keySelector: suspend (T) -> 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, V> ReceiveChannel<T>.groupBy(keySelector: suspend (T) -> K, valueTransform: suspend (T) -> V): Map<K, List<V>> {
-    return groupByTo(LinkedHashMap<K, MutableList<V>>(), keySelector, valueTransform)
-}
+public inline suspend fun <T, K, V> ReceiveChannel<T>.groupBy(keySelector: (T) -> K, valueTransform: (T) -> V): Map<K, List<V>> =
+    groupByTo(LinkedHashMap<K, MutableList<V>>(), keySelector, valueTransform)
 
 /**
  * Groups elements of the original channel by the key returned by the given [keySelector] function
@@ -773,8 +755,7 @@ public suspend fun <T, K, V> ReceiveChannel<T>.groupBy(keySelector: suspend (T) 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, M : MutableMap<in K, MutableList<T>>> ReceiveChannel<T>.groupByTo(destination: M, keySelector: suspend (T) -> K): M {
+public inline suspend fun <T, K, M : MutableMap<in K, MutableList<T>>> ReceiveChannel<T>.groupByTo(destination: M, keySelector: (T) -> K): M {
     for (element in this) {
         val key = keySelector(element)
         val list = destination.getOrPut(key) { ArrayList<T>() }
@@ -792,8 +773,7 @@ public suspend fun <T, K, M : MutableMap<in K, MutableList<T>>> ReceiveChannel<T
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, K, V, M : MutableMap<in K, MutableList<V>>> ReceiveChannel<T>.groupByTo(destination: M, keySelector: suspend (T) -> K, valueTransform: suspend (T) -> V): M {
+public inline suspend fun <T, K, V, M : MutableMap<in K, MutableList<V>>> ReceiveChannel<T>.groupByTo(destination: M, keySelector: (T) -> K, valueTransform: (T) -> V): M {
     for (element in this) {
         val key = keySelector(element)
         val list = destination.getOrPut(key) { ArrayList<V>() }
@@ -808,12 +788,13 @@ public suspend fun <T, K, V, M : MutableMap<in K, MutableList<V>>> ReceiveChanne
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T, R> ReceiveChannel<T>.map(transform: suspend (T) -> R): ReceiveChannel<R> = produce(Unconfined) {
-    for (element in this@map) {
-        send(transform(element))
-
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T, R> ReceiveChannel<T>.map(context: CoroutineContext = Unconfined, transform: suspend (T) -> R): ReceiveChannel<R> =
+    produce(context) {
+        for (element in this@map) {
+            send(transform(element))
+        }
     }
-}
 
 /**
  * Returns a channel containing the results of applying the given [transform] function
@@ -823,13 +804,15 @@ public suspend fun <T, R> ReceiveChannel<T>.map(transform: suspend (T) -> R): Re
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T, R> ReceiveChannel<T>.mapIndexed(transform: suspend (index: Int, T) -> R): ReceiveChannel<R> = produce(Unconfined) {
-    var index = 0
-    for (element in this@mapIndexed) {
-        send(transform(index++, element))
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T, R> ReceiveChannel<T>.mapIndexed(context: CoroutineContext = Unconfined, transform: suspend (index: Int, T) -> R): ReceiveChannel<R> =
+    produce(context) {
+        var index = 0
+        for (element in this@mapIndexed) {
+            send(transform(index++, element))
 
+        }
     }
-}
 
 /**
  * Returns a channel containing only the non-null results of applying the given [transform] function
@@ -839,8 +822,9 @@ public suspend fun <T, R> ReceiveChannel<T>.mapIndexed(transform: suspend (index
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T, R : Any> ReceiveChannel<T>.mapIndexedNotNull(transform: suspend (index: Int, T) -> R?): ReceiveChannel<R> =
-        mapIndexed(transform).filterNotNull()
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T, R : Any> ReceiveChannel<T>.mapIndexedNotNull(context: CoroutineContext = Unconfined, transform: suspend (index: Int, T) -> R?): ReceiveChannel<R> =
+    mapIndexed(context, transform).filterNotNull()
 
 /**
  * Applies the given [transform] function to each element and its index in the original channel
@@ -850,8 +834,7 @@ public suspend fun <T, R : Any> ReceiveChannel<T>.mapIndexedNotNull(transform: s
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R : Any, C : SendChannel<in R>> ReceiveChannel<T>.mapIndexedNotNullTo(destination: C, transform: suspend (index: Int, T) -> R?): C {
+public inline suspend fun <T, R : Any, C : SendChannel<in R>> ReceiveChannel<T>.mapIndexedNotNullTo(destination: C, transform: (index: Int, T) -> R?): C {
     consumeEachIndexed { (index, element) ->
         transform(index, element)?.let { destination.send(it) }
     }
@@ -866,8 +849,7 @@ public suspend fun <T, R : Any, C : SendChannel<in R>> ReceiveChannel<T>.mapInde
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R, C : SendChannel<in R>> ReceiveChannel<T>.mapIndexedTo(destination: C, transform: suspend (index: Int, T) -> R): C {
+public inline suspend fun <T, R, C : SendChannel<in R>> ReceiveChannel<T>.mapIndexedTo(destination: C, transform: (index: Int, T) -> R): C {
     var index = 0
     for (item in this)
         destination.send(transform(index++, item))
@@ -880,9 +862,9 @@ public suspend fun <T, R, C : SendChannel<in R>> ReceiveChannel<T>.mapIndexedTo(
  *
  * The operation is _intermediate_ and _stateless_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R : Any> ReceiveChannel<T>.mapNotNull(transform: suspend (T) -> R?): ReceiveChannel<R> =
-        map(transform).filterNotNull()
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T, R : Any> ReceiveChannel<T>.mapNotNull(context: CoroutineContext = Unconfined, transform: suspend (T) -> R?): ReceiveChannel<R> =
+    map(context, transform).filterNotNull()
 
 /**
  * Applies the given [transform] function to each element in the original channel
@@ -890,8 +872,7 @@ public suspend fun <T, R : Any> ReceiveChannel<T>.mapNotNull(transform: suspend 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R : Any, C : SendChannel<in R>> ReceiveChannel<T>.mapNotNullTo(destination: C, transform: suspend (T) -> R?): C {
+public inline suspend fun <T, R : Any, C : SendChannel<R>> ReceiveChannel<T>.mapNotNullTo(destination: C, transform: (T) -> R?): C {
     consumeEach { element -> transform(element)?.let { destination.send(it) } }
     return destination
 }
@@ -902,10 +883,10 @@ public suspend fun <T, R : Any, C : SendChannel<in R>> ReceiveChannel<T>.mapNotN
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R, C : SendChannel<in R>> ReceiveChannel<T>.mapTo(destination: C, transform: suspend (T) -> R): C {
-    for (item in this)
+public inline suspend fun <T, R, C : SendChannel<R>> ReceiveChannel<T>.mapTo(destination: C, transform: (T) -> R): C {
+    for (item in this) {
         destination.send(transform(item))
+    }
     return destination
 }
 
@@ -914,12 +895,13 @@ public suspend fun <T, R, C : SendChannel<in R>> ReceiveChannel<T>.mapTo(destina
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T> ReceiveChannel<T>.withIndex(): ReceiveChannel<IndexedValue<T>> = produce(CommonPool) {
-    var index = 0
-    for (element in this@withIndex) {
-        send(IndexedValue(index++, element))
+public suspend fun <T> ReceiveChannel<T>.withIndex(context: CoroutineContext = Unconfined): ReceiveChannel<IndexedValue<T>> =
+    produce(context) {
+        var index = 0
+        for (element in this@withIndex) {
+            send(IndexedValue(index++, element))
+        }
     }
-}
 
 /**
  * Returns a channel containing only distinct elements from the given channel.
@@ -928,9 +910,8 @@ public suspend fun <T> ReceiveChannel<T>.withIndex(): ReceiveChannel<IndexedValu
  *
  * The operation is _intermediate_ and _stateful_.
  */
-public suspend fun <T> ReceiveChannel<T>.distinct(): ReceiveChannel<T> {
-    return this.distinctBy { it }
-}
+public suspend fun <T> ReceiveChannel<T>.distinct(): ReceiveChannel<T> =
+    this.distinctBy { it }
 
 /**
  * Returns a channel containing only elements from the given channel
@@ -940,16 +921,18 @@ public suspend fun <T> ReceiveChannel<T>.distinct(): ReceiveChannel<T> {
  *
  * The operation is _intermediate_ and _stateful_.
  */
-public suspend fun <T, K> ReceiveChannel<T>.distinctBy(selector: suspend (T) -> K): ReceiveChannel<T> = produce(Unconfined) {
-    val keys = HashSet<K>()
-    for (element in this@distinctBy) {
-        val k = selector(element)
-        if (k !in keys) {
-            send(element)
-            keys += k
+// todo: mark predicate with crossinline modifier when it is supported: https://youtrack.jetbrains.com/issue/KT-19159
+public suspend fun <T, K> ReceiveChannel<T>.distinctBy(context: CoroutineContext = Unconfined, selector: suspend (T) -> K): ReceiveChannel<T> =
+    produce(context) {
+        val keys = HashSet<K>()
+        for (element in this@distinctBy) {
+            val k = selector(element)
+            if (k !in keys) {
+                send(element)
+                keys += k
+            }
         }
     }
-}
 
 /**
  * Returns a mutable set containing all distinct elements from the given channel.
@@ -969,8 +952,7 @@ public suspend fun <T> ReceiveChannel<T>.toMutableSet(): MutableSet<T> {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.all(predicate: suspend (T) -> Boolean): Boolean {
+public inline suspend fun <T> ReceiveChannel<T>.all(predicate: (T) -> Boolean): Boolean {
     for (element in this) if (!predicate(element)) return false
     return true
 }
@@ -990,8 +972,7 @@ public suspend fun <T> ReceiveChannel<T>.any(): Boolean {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.any(predicate: suspend (T) -> Boolean): Boolean {
+public inline suspend fun <T> ReceiveChannel<T>.any(predicate: (T) -> Boolean): Boolean {
     for (element in this) if (predicate(element)) return true
     return false
 }
@@ -1012,8 +993,7 @@ public suspend fun <T> ReceiveChannel<T>.count(): Int {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.count(predicate: suspend (T) -> Boolean): Int {
+public inline suspend fun <T> ReceiveChannel<T>.count(predicate: (T) -> Boolean): Int {
     var count = 0
     for (element in this) if (predicate(element)) count++
     return count
@@ -1024,8 +1004,7 @@ public suspend fun <T> ReceiveChannel<T>.count(predicate: suspend (T) -> Boolean
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R> ReceiveChannel<T>.fold(initial: R, operation: suspend (acc: R, T) -> R): R {
+public inline suspend fun <T, R> ReceiveChannel<T>.fold(initial: R, operation: (acc: R, T) -> R): R {
     var accumulator = initial
     for (element in this) accumulator = operation(accumulator, element)
     return accumulator
@@ -1039,8 +1018,7 @@ public suspend fun <T, R> ReceiveChannel<T>.fold(initial: R, operation: suspend 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R> ReceiveChannel<T>.foldIndexed(initial: R, operation: suspend (index: Int, acc: R, T) -> R): R {
+public inline suspend fun <T, R> ReceiveChannel<T>.foldIndexed(initial: R, operation: (index: Int, acc: R, T) -> R): R {
     var index = 0
     var accumulator = initial
     for (element in this) accumulator = operation(index++, accumulator, element)
@@ -1052,7 +1030,7 @@ public suspend fun <T, R> ReceiveChannel<T>.foldIndexed(initial: R, operation: s
  *
  * The operation is _terminal_.
  */
-public suspend fun <T, R : Comparable<R>> ReceiveChannel<T>.maxBy(selector: suspend (T) -> R): T? {
+public inline suspend fun <T, R : Comparable<R>> ReceiveChannel<T>.maxBy(selector: (T) -> R): T? {
     val iterator = iterator()
     if (!iterator.hasNext()) return null
     var maxElem = iterator.next()
@@ -1089,7 +1067,7 @@ public suspend fun <T> ReceiveChannel<T>.maxWith(comparator: Comparator<in T>): 
  *
  * The operation is _terminal_.
  */
-public suspend fun <T, R : Comparable<R>> ReceiveChannel<T>.minBy(selector: suspend (T) -> R): T? {
+public inline suspend fun <T, R : Comparable<R>> ReceiveChannel<T>.minBy(selector: (T) -> R): T? {
     val iterator = iterator()
     if (!iterator.hasNext()) return null
     var minElem = iterator.next()
@@ -1136,8 +1114,7 @@ public suspend fun <T> ReceiveChannel<T>.none(): Boolean {
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.none(predicate: suspend (T) -> Boolean): Boolean {
+public inline suspend fun <T> ReceiveChannel<T>.none(predicate: (T) -> Boolean): Boolean {
     for (element in this) if (predicate(element)) return false
     return true
 }
@@ -1147,8 +1124,7 @@ public suspend fun <T> ReceiveChannel<T>.none(predicate: suspend (T) -> Boolean)
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <S, T : S> ReceiveChannel<T>.reduce(operation: suspend (acc: S, T) -> S): S {
+public inline suspend fun <S, T : S> ReceiveChannel<T>.reduce(operation: (acc: S, T) -> S): S {
     val iterator = this.iterator()
     if (!iterator.hasNext()) throw UnsupportedOperationException("Empty channel can't be reduced.")
     var accumulator: S = iterator.next()
@@ -1166,8 +1142,7 @@ public suspend fun <S, T : S> ReceiveChannel<T>.reduce(operation: suspend (acc: 
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <S, T : S> ReceiveChannel<T>.reduceIndexed(operation: suspend (index: Int, acc: S, T) -> S): S {
+public inline suspend fun <S, T : S> ReceiveChannel<T>.reduceIndexed(operation: (index: Int, acc: S, T) -> S): S {
     val iterator = this.iterator()
     if (!iterator.hasNext()) throw UnsupportedOperationException("Empty channel can't be reduced.")
     var index = 1
@@ -1183,8 +1158,7 @@ public suspend fun <S, T : S> ReceiveChannel<T>.reduceIndexed(operation: suspend
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.sumBy(selector: suspend (T) -> Int): Int {
+public inline suspend fun <T> ReceiveChannel<T>.sumBy(selector: (T) -> Int): Int {
     var sum: Int = 0
     for (element in this) {
         sum += selector(element)
@@ -1197,8 +1171,7 @@ public suspend fun <T> ReceiveChannel<T>.sumBy(selector: suspend (T) -> Int): In
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.sumByDouble(selector: suspend (T) -> Double): Double {
+public inline suspend fun <T> ReceiveChannel<T>.sumByDouble(selector: (T) -> Double): Double {
     var sum: Double = 0.0
     for (element in this) {
         sum += selector(element)
@@ -1211,9 +1184,8 @@ public suspend fun <T> ReceiveChannel<T>.sumByDouble(selector: suspend (T) -> Do
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public suspend fun <T : Any> ReceiveChannel<T?>.requireNoNulls(): ReceiveChannel<T> {
-    return map { it ?: throw IllegalArgumentException("null element found in $this.") }
-}
+public suspend fun <T : Any> ReceiveChannel<T?>.requireNoNulls(): ReceiveChannel<T> =
+    map { it ?: throw IllegalArgumentException("null element found in $this.") }
 
 /**
  * Splits the original channel into pair of lists,
@@ -1222,8 +1194,7 @@ public suspend fun <T : Any> ReceiveChannel<T?>.requireNoNulls(): ReceiveChannel
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T> ReceiveChannel<T>.partition(predicate: suspend (T) -> Boolean): Pair<List<T>, List<T>> {
+public inline suspend fun <T> ReceiveChannel<T>.partition(predicate: (T) -> Boolean): Pair<List<T>, List<T>> {
     val first = ArrayList<T>()
     val second = ArrayList<T>()
     for (element in this) {
@@ -1242,8 +1213,7 @@ public suspend fun <T> ReceiveChannel<T>.partition(predicate: suspend (T) -> Boo
  *
  * The operation is _terminal_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, C : SendChannel<in T>> ReceiveChannel<T>.sendTo(destination: C): C {
+public suspend fun <T, C : SendChannel<T>> ReceiveChannel<T>.sendTo(destination: C): C {
     for (item in this)
         destination.send(item)
     return destination
@@ -1255,19 +1225,18 @@ public suspend fun <T, C : SendChannel<in T>> ReceiveChannel<T>.sendTo(destinati
  *
  * The operation is _intermediate_ and _stateless_.
  */
-public infix suspend fun <T, R> ReceiveChannel<T>.zip(other: ReceiveChannel<R>): ReceiveChannel<Pair<T, R>> {
-    return zip(other) { t1, t2 -> t1 to t2 }
-}
+public infix suspend fun <T, R> ReceiveChannel<T>.zip(other: ReceiveChannel<R>): ReceiveChannel<Pair<T, R>> =
+    zip(other) { t1, t2 -> t1 to t2 }
 
 /**
  * Returns a channel of values built from elements of both collections with same indexes using provided [transform]. Resulting channel has length of shortest input channels.
  *
  * The operation is _intermediate_ and _stateless_.
  */
-// :todo: make it inline when this bug is fixed: https://youtrack.jetbrains.com/issue/KT-16448
-public suspend fun <T, R, V> ReceiveChannel<T>.zip(other: ReceiveChannel<R>, transform: suspend (a: T, b: R) -> V): ReceiveChannel<V> = produce(Unconfined) {
-    for (element1 in this@zip) {
-        val element2 = other.receiveOrNull() ?: break
-        send(transform(element1, element2))
+public suspend fun <T, R, V> ReceiveChannel<T>.zip(other: ReceiveChannel<R>, context: CoroutineContext = Unconfined, transform: (a: T, b: R) -> V): ReceiveChannel<V> =
+    produce(context) {
+        for (element1 in this@zip) {
+            val element2 = other.receiveOrNull() ?: break
+            send(transform(element1, element2))
+        }
     }
-}
