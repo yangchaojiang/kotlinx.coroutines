@@ -16,7 +16,6 @@
 
 package kotlinx.coroutines.experimental.channels
 
-import kotlinx.coroutines.experimental.CommonPool
 import kotlinx.coroutines.experimental.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -30,29 +29,8 @@ class ChannelsTest {
     }
 
     @Test
-    fun testAsSequence() {
-        assertEquals(testList, testList.asReceiveChannel().asBlockingSequence().toList())
-    }
-
-    @Test
     fun testAssociateBy() = runBlocking {
         assertEquals(testList.associateBy { it % 2 }, testList.asReceiveChannel().associateBy { it % 2 })
-    }
-
-    @Test
-    fun testAsSequenceLazy() = runBlocking {
-        val numbers = produce(CommonPool) {
-            repeat(2) { i ->
-                send(i)
-            }
-            fail()
-        }
-        val take2 = numbers
-                .asBlockingSequence()
-                .take(2)
-                .toList()
-
-        assertEquals(listOf(0, 1), take2)
     }
 
     @Test
@@ -62,10 +40,9 @@ class ChannelsTest {
     }
 
     @Test
-    fun testDrainTo() = runBlocking {
+    fun testConsumeTo() = runBlocking {
         val target = mutableListOf<Int>()
-        testList.asReceiveChannel().drainTo(target)
-
+        testList.asReceiveChannel().consumeTo(target)
         assertEquals(testList, target)
     }
 

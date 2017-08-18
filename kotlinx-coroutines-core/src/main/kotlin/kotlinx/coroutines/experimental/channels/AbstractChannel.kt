@@ -390,6 +390,11 @@ public abstract class AbstractSendChannel<E> : SendChannel<E> {
             remove()
         }
 
+        override fun resumeSendClosed(closed: Closed<*>) {
+            if (select.trySelect(null))
+                select.resumeSelectCancellableWithException(closed.sendException)
+        }
+
         override fun toString(): String = "SendSelect($pollResult)[$select]"
     }
 
@@ -399,6 +404,7 @@ public abstract class AbstractSendChannel<E> : SendChannel<E> {
         override val pollResult: Any? get() = element
         override fun tryResumeSend(idempotent: Any?): Any? = SEND_RESUMED
         override fun completeResumeSend(token: Any) { check(token === SEND_RESUMED) }
+        override fun resumeSendClosed(closed: Closed<*>) {}
     }
 }
 
@@ -557,6 +563,25 @@ public abstract class AbstractChannel<E> : AbstractSendChannel<E>(), Channel<E> 
     public final override fun poll(): E? {
         val result = pollInternal()
         return if (result === POLL_FAILED) null else receiveOrNullResult(result)
+    }
+
+    override fun consumeAll() {
+        close(cause = null)
+        // now cleanup send queue
+        consumeAllInternal()
+    }
+
+    // Note: this function is invoked when channel is already closed
+    protected open fun consumeAllInternal() {
+        val closed = closedForSend ?: error("Cannot happen")
+        while (true) {
+            val send = takeFirstSendOrPeekClosed() ?: error("Cannot happen")
+            if (send is Closed<*>) {
+                check(send === closed)
+                return // cleaned
+            }
+            send.resumeSendClosed(closed)
+        }
     }
 
     public final override fun iterator(): ChannelIterator<E> = Itr(this)
@@ -887,6 +912,7 @@ public interface Send {
     val pollResult: Any? // E | Closed
     fun tryResumeSend(idempotent: Any?): Any?
     fun completeResumeSend(token: Any)
+    fun resumeSendClosed(closed: Closed<*>)
 }
 
 /**
@@ -900,7 +926,7 @@ public interface ReceiveOrClosed<in E> {
 }
 
 /**
- * Represents closed channel.
+ * Represents sender for a specific element.
  * @suppress **This is unstable API and it is subject to change.**
  */
 @Suppress("UNCHECKED_CAST")
@@ -910,6 +936,7 @@ public class SendElement(
 ) : LockFreeLinkedListNode(), Send {
     override fun tryResumeSend(idempotent: Any?): Any? = cont.tryResume(Unit, idempotent)
     override fun completeResumeSend(token: Any) = cont.completeResume(token)
+    override fun resumeSendClosed(closed: Closed<*>) = cont.resumeWithException(closed.sendException)
     override fun toString(): String = "SendElement($pollResult)[$cont]"
 }
 
@@ -929,6 +956,7 @@ public class Closed<in E>(
     override fun completeResumeSend(token: Any) { check(token === CLOSE_RESUMED) }
     override fun tryResumeReceive(value: E, idempotent: Any?): Any? = CLOSE_RESUMED
     override fun completeResumeReceive(token: Any) { check(token === CLOSE_RESUMED) }
+    override fun resumeSendClosed(closed: Closed<*>) = error("Should be never invoked")
     override fun toString(): String = "Closed[$closeCause]"
 }
 

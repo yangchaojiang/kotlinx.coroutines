@@ -205,7 +205,7 @@ class ArrayBroadcastChannel<E>(
         override val isBufferAlwaysFull: Boolean get() = error("Should not be used")
         override val isBufferFull: Boolean get() = error("Should not be used")
 
-        override fun close() {
+        override fun consumeAll() {
             if (close(cause = null))
                 broadcastChannel.closeSubscriber(this)
         }

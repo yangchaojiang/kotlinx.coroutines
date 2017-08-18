@@ -76,10 +76,12 @@ public fun <E> BroadcastChannel(capacity: Int): BroadcastChannel<E> =
 /**
  * Return type for [BroadcastChannel.openSubscription] that can be used to [receive] elements from the
  * open subscription and to [close] it to unsubscribe.
+ *
+ * Note, that invocation of [consumeAll] also closes subscription.
  */
 public interface SubscriptionReceiveChannel<out T> : ReceiveChannel<T>, Closeable {
     /**
-     * Closes this subscription.
+     * Closes this subscription. This is a synonym for [consumeAll].
      */
-    public override fun close()
+    public override fun close() = consumeAll()
 }

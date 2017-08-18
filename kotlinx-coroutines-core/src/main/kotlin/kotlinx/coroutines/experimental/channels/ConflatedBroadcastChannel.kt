@@ -245,7 +245,7 @@ public class ConflatedBroadcastChannel<E>() : BroadcastChannel<E> {
     private class Subscriber<E>(
         private val broadcastChannel: ConflatedBroadcastChannel<E>
     ) : ConflatedChannel<E>(), SubscriptionReceiveChannel<E> {
-        override fun close() {
+        override fun consumeAll() {
             if (close(cause = null))
                 broadcastChannel.closeSubscriber(this)
         }

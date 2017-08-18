@@ -88,7 +88,9 @@ public interface SendChannel<in E> {
     /**
      * Closes this channel with an optional exceptional [cause].
      * This is an idempotent operation -- repeated invocations of this function have no effect and return `false`.
-     * Conceptually, its sends a special "close token" over this channel. Immediately after invocation of this function
+     * Conceptually, its sends a special "close token" over this channel.
+     *
+     * Immediately after invocation of this function
      * [isClosedForSend] starts returning `true`. However, [isClosedForReceive][ReceiveChannel.isClosedForReceive]
      * on the side of [ReceiveChannel] starts returning `true` only after all previously sent elements
      * are received.
@@ -177,6 +179,18 @@ public interface ReceiveChannel<out E> {
      * throws the original [close][SendChannel.close] cause exception if the channel has _failed_.
      */
     public operator fun iterator(): ChannelIterator<E>
+
+    /**
+     * Consumes all remaining elements from this channel. This function marks the channel as _consumed_
+     * by closing it normally (unless it was already closed) and removes all buffered sent elements from it.
+     *
+     * Immediately after invocation of this function [isClosedForReceive] and
+     * [isClosedForSend][SendChannel.isClosedForSend]
+     * on the side of [SendChannel] start returning `true`, so all attempts to send to this channel
+     * afterwards will throw [ClosedSendChannelException], while attempts to receive will throw
+     * [ClosedReceiveChannelException].
+     */
+    public fun consumeAll()
 
     /**
      * Registers [onReceive][SelectBuilder.onReceive] select clause.

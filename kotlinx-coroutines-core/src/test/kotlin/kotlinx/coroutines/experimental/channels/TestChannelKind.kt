@@ -70,6 +70,7 @@ private class ChannelViaBroadcast<E>(
     suspend override fun receiveOrNull(): E? = sub.receiveOrNull()
     override fun poll(): E? = sub.poll()
     override fun iterator(): ChannelIterator<E> = sub.iterator()
+    override fun consumeAll() = sub.consumeAll()
     override fun <R> registerSelectReceive(select: SelectInstance<R>, block: suspend (E) -> R) =
         sub.registerSelectReceive(select, block)
     override fun <R> registerSelectReceiveOrNull(select: SelectInstance<R>, block: suspend (E?) -> R) =
