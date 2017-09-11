@@ -26,9 +26,9 @@ import kotlin.coroutines.experimental.CoroutineContext
  * * If there is [CoroutineExceptionHandler] in the context, then it is used.
  * * Otherwise, if exception is [CancellationException] then it is ignored
  *   (because that is the supposed mechanism to cancel the running coroutine)
- * * Otherwise, if there is a [Job] in the context, then [Job.cancel] is invoked and if it
- *   returns `true` (it was still active), then the exception is considered to be handled.
- * * Otherwise, current thread's [Thread.uncaughtExceptionHandler] is used.
+ * * Otherwise:
+ *     * if there is a [Job] in the context, then [Job.cancel] is invoked;
+ *     * and current thread's [Thread.uncaughtExceptionHandler] is invoked.
  */
 fun handleCoroutineException(context: CoroutineContext, exception: Throwable) {
     context[CoroutineExceptionHandler]?.let {
@@ -37,9 +37,9 @@ fun handleCoroutineException(context: CoroutineContext, exception: Throwable) {
     }
     // ignore CancellationException (they are normal means to terminate a coroutine)
     if (exception is CancellationException) return
-    // quit if successfully pushed exception as cancellation reason
-    if (context[Job]?.cancel(exception) ?: false) return
-    // otherwise just use thread's handler
+    // try cancel job in the context
+    context[Job]?.cancel(exception)
+    // use thread's handler
     val currentThread = Thread.currentThread()
     currentThread.uncaughtExceptionHandler.uncaughtException(currentThread, exception)
 }

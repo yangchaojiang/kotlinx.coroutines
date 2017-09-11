@@ -128,7 +128,7 @@ public interface Job : CoroutineContext.Element {
 
     /**
      * Returns the exception that signals the completion of this job -- it returns the original
-     * [cancel] cause or an instance of [CancellationException] if this job had completed
+     * [cancel] cause or an instance of [JobCancellationException] if this job had completed
      * normally or was cancelled without a cause. This function throws
      * [IllegalStateException] when invoked for an job that has not [completed][isCompleted] nor
      * [isCancelled] yet.
@@ -198,6 +198,9 @@ public interface Job : CoroutineContext.Element {
      * of its code and became _cancelled_. There is an overloaded version of this function
      * with `onCancelling` parameter to receive notification on _cancelling_ state.
      *
+     * Installed [handler] should not throw any exceptions. If it does, they will get caught,
+     * wrapped into [CompletionHandlerException], and rethrown, potentially causing crash of unrelated code.
+     *
      * **Note**: This function is a part of internal machinery that supports parent-child hierarchies
      * and allows for implementation of suspending functions that wait on the Job's state.
      * This function should not be used in general application code.
@@ -222,6 +225,9 @@ public interface Job : CoroutineContext.Element {
      * registration of this handler and release its memory if its invocation is no longer needed.
      * There is no need to dispose the handler after completion of this job. The references to
      * all the handlers are released when this job completes.
+     *
+     * Installed [handler] should not throw any exceptions. If it does, they will get caught,
+     * wrapped into [CompletionHandlerException], and rethrown, potentially causing crash of unrelated code.
      *
      * **Note**: This function is a part of internal machinery that supports parent-child hierarchies
      * and allows for implementation of suspending functions that wait on the Job's state.
@@ -291,17 +297,57 @@ public interface DisposableHandle : Job.Registration {
 /**
  * Handler for [Job.invokeOnCompletion].
  *
+ * Installed handler should not throw any exceptions. If it does, they will get caught,
+ * wrapped into [CompletionHandlerException], and rethrown, potentially causing crash of unrelated code.
+ *
  * **Note**: This type is a part of internal machinery that supports parent-child hierarchies
  * and allows for implementation of suspending functions that wait on the Job's state.
  * This type should not be used in general application code.
  * Implementations of `CompletionHandler` must be fast and _lock-free_.
  */
-public typealias CompletionHandler = (Throwable?) -> Unit
+public typealias CompletionHandler = (cause: Throwable?) -> Unit
+
+/**
+ * This exception gets thrown if an exception is caught while processing [CompletionHandler] invocation for [Job].
+ */
+public class CompletionHandlerException(message: String, cause: Throwable) : RuntimeException(message, cause)
 
 /**
  * Thrown by cancellable suspending functions if the [Job] of the coroutine is cancelled while it is suspending.
  */
 public typealias CancellationException = java.util.concurrent.CancellationException
+
+/**
+ * Creates a cancellation exception with a given [message] and [cause].
+ */
+public fun CancellationException(message: String, cause: Throwable) : CancellationException =
+    CancellationException(message).apply { initCause(cause) }
+
+/**
+ * Thrown by cancellable suspending functions if the [Job] of the coroutine is cancelled while it is suspending.
+ */
+public class JobCancellationException(
+    private val text: String,
+    /**
+     * The job that was cancelled.
+     */
+    public val job: Job,
+    cause: Throwable? = null
+) : CancellationException(text) {
+    init { if (cause != null) initCause(cause) }
+    override fun toString(): String = "$text; job=$job"
+    override fun equals(other: Any?): Boolean =
+        other === this || other is JobCancellationException &&
+            text == other.text && job == other.job && cause == other.cause
+    override fun hashCode(): Int = (text.hashCode() * 31 + job.hashCode()) * 31 + (cause?.hashCode() ?: 0)
+}
+
+/**
+ * Represents an exception in the coroutine that was not caught by it and was not expected to be thrown.
+ * This happens when coroutine is cancelled, but it completes with the different exception than its cancellation
+ * cause was.
+ */
+public class UnexpectedCoroutineException(message: String, cause: Throwable) : RuntimeException(message, cause)
 
 /**
  * Unregisters a specified [registration] when this job is complete.
@@ -472,7 +518,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     }
 
     private inner class ParentOnCancellation(parent: Job) : JobCancellationNode<Job>(parent) {
-        override fun invokeOnce(reason: Throwable?) { onParentCancellation(reason) }
+        override fun invokeOnce(reason: Throwable?) { onParentCancellation(job, reason) }
         override fun toString(): String = "ParentOnCancellation[${this@JobSupport}]"
     }
 
@@ -480,11 +526,13 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
      * Invoked at most once on parent completion.
      * @suppress **This is unstable API and it is subject to change.**
      */
-    protected open fun onParentCancellation(cause: Throwable?) {
-        // if parent was completed with CancellationException then use it as the cause of our cancellation, too.
-        // however, we shall not use application specific exceptions here. So if parent crashes due to IOException,
-        // we cannot and should not cancel the child with IOException
-        cancel(cause as? CancellationException)
+    protected open fun onParentCancellation(parent: Job, cause: Throwable?) {
+        // Always materialized the actual instance of paren't completion exception
+        val exception = parent.getCompletionException()
+        // create a new instance of CancellationException with the original exception as cause,
+        // unless the parent was also cancelled, in this case just keep this original exception
+        cancel(exception as? CancellationException ?:
+            JobCancellationException("Parent job has completed", this, exception))
     }
 
     // ------------ state query ------------
@@ -527,10 +575,16 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         if (!tryUpdateState(expect, update)) return false
         completeUpdateState(expect, update, mode)
         // if an exceptional completion was suppressed (because cancellation was in progress), then report it separately
-        if (proposedUpdate !== update && proposedUpdate is CompletedExceptionally && proposedUpdate.cause != null)
-            handleException(proposedUpdate.cause)
+        if (proposedUpdate is CompletedExceptionally && proposedUpdate.cause != null && unexpectedCause(proposedUpdate, update)) {
+            handleException(UnexpectedCoroutineException("Unexpected exception while cancellation is in progress; job=$this", proposedUpdate.cause))
+        }
         return true
     }
+
+    private fun unexpectedCause(proposedUpdate: CompletedExceptionally, update: Any?) =
+        proposedUpdate !== update && (update !is CompletedExceptionally ||
+            // Equality comparison of exceptions by design -- see JobCancellationExceptions equality definition
+            proposedUpdate.cause != update.exception)
 
     // when Job is in Cancelling state, it can only be promoted to Cancelled state with the same cause
     // however, null cause can be replaced with more specific CancellationException (that contains stack trace)
@@ -565,7 +619,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
             is JobNode<*> -> try { // SINGLE/SINGLE+ state -- one completion handler (common case)
                 expect.invoke(cause)
             } catch (ex: Throwable) {
-                handleException(ex)
+                handleException(CompletionHandlerException("Exception in completion handler $expect for $this", ex))
             }
             is NodeList -> notifyCompletion(expect, cause) // LIST state -- a list of completion handlers
             is Cancelling -> notifyCompletion(expect.list, cause) // has list, too
@@ -583,9 +637,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
             try {
                 node.invoke(cause)
             } catch (ex: Throwable) {
-                exception?.apply { addSuppressed(ex) } ?: run { exception = ex }
+                exception?.apply { addSuppressed(ex) } ?: run {
+                    exception =  CompletionHandlerException("Exception in completion handler $node for $this", ex)
+                }
             }
-
         }
         exception?.let { handleException(it) }
     }
@@ -636,9 +691,9 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         val state = this.state
         return when (state) {
             is Cancelling -> state.cancelled.exception
-            is Incomplete -> error("Job was not completed or cancelled yet")
+            is Incomplete -> error("Job was not completed or cancelled yet: $this")
             is CompletedExceptionally -> state.exception
-            else -> CancellationException("Job has completed normally")
+            else -> JobCancellationException("Job has completed normally", this)
         }
     }
 
@@ -793,7 +848,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     // we will be dispatching coroutine to process its cancellation exception, so there is no need for
     // an extra check for Job status in MODE_CANCELLABLE
     private fun updateStateCancelled(state: Incomplete, cause: Throwable?) =
-        updateState(state, Cancelled(cause), mode = MODE_ATOMIC_DEFAULT)
+        updateState(state, Cancelled(this, cause), mode = MODE_ATOMIC_DEFAULT)
 
     // transitions to Cancelled state
     private fun makeCancelled(cause: Throwable?): Boolean {
@@ -822,7 +877,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
                 is NodeList -> { // LIST -- a list of completion handlers (either new or active)
                     if (state.isActive) {
                         // try make it cancelling on the condition that we're still in this state
-                        if (_state.compareAndSet(state, Cancelling(state, Cancelled(cause)))) {
+                        if (_state.compareAndSet(state, Cancelling(state, Cancelled(this, cause)))) {
                             notifyCancellation(state, cause)
                             onCancellation()
                             return true
@@ -863,8 +918,8 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     // for nicer debugging
     override fun toString(): String {
         val state = this.state
-        val result = if (state is Incomplete) "" else "[$state]"
-        return "${this::class.java.simpleName}{${stateToString(state)}}$result@${Integer.toHexString(System.identityHashCode(this))}"
+        //val result = if (state is Incomplete) "" else "[$state]"
+        return "${this::class.java.simpleName}{${stateToString(state)}}@${Integer.toHexString(System.identityHashCode(this))}"
     }
 
     /**
@@ -904,32 +959,52 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     /**
      * Class for a [state] of a job that had completed exceptionally, including cancellation.
      *
-     * @param cause the exceptional completion cause. If `cause` is null, then a [CancellationException]
-     *        if created on first get from [exception] property.
+     * @param cause the exceptional completion cause. If `cause` is null, then an exception is
+     *        if created via [createException] on first get from [exception] property.
+     * @param allowNullCause if `null` cause is allowed.
      */
-    public open class CompletedExceptionally(
-        @JvmField val cause: Throwable?
+    public open class CompletedExceptionally protected constructor(
+        public @JvmField val cause: Throwable?,
+        allowNullCause: Boolean
     ) {
+        /**
+         * Creates exceptionally completed state.
+         * @param cause the exceptional completion cause.
+         */
+        public constructor(cause: Throwable) : this(cause, false)
+
         @Volatile
-        private var _exception: Throwable? = cause // materialize CancellationException on first need
+        private var _exception: Throwable? = cause // will materialize JobCancellationException on first need
+
+        init {
+            require(allowNullCause || cause != null) { "Null cause is not allowed" }
+        }
 
         /**
          * Returns completion exception.
          */
         public val exception: Throwable get() =
             _exception ?: // atomic read volatile var or else create new
-                CancellationException("Job was cancelled").also { _exception = it }
+                createException().also { _exception = it }
+
+        protected open fun createException(): Throwable = error("Completion exception was not specified")
 
         override fun toString(): String = "${this::class.java.simpleName}[$exception]"
     }
 
     /**
      * A specific subclass of [CompletedExceptionally] for cancelled jobs.
+     *
+     * @param job the job that was cancelled.
+     * @param cause the exceptional completion cause. If `cause` is null, then a [JobCancellationException]
+     *        if created on first get from [exception] property.
      */
     public class Cancelled(
+        private val job: Job,
         cause: Throwable?
-    ) : CompletedExceptionally(cause)
-
+    ) : CompletedExceptionally(cause, true) {
+        override fun createException(): Throwable = JobCancellationException("Job was cancelled normally", job)
+    }
 
     /*
      * =================================================================================================
@@ -1117,4 +1192,5 @@ private class InvokeOnCancellation(
     override fun invokeOnce(reason: Throwable?) = handler.invoke(reason)
     override fun toString() = "InvokeOnCancellation[${handler::class.java.name}@${Integer.toHexString(System.identityHashCode(handler))}]"
 }
+
 
