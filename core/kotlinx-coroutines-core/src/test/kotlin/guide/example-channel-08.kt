@@ -17,12 +17,15 @@
 // This file was automatically generated from coroutines-guide.md by Knit tool. Do not edit.
 package guide.channel.example08
 
-import kotlinx.coroutines.experimental.*
-import kotlinx.coroutines.experimental.channels.*
+import kotlinx.coroutines.experimental.cancelAndJoin
+import kotlinx.coroutines.experimental.channels.Channel
+import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.launch
+import kotlinx.coroutines.experimental.runBlocking
 
 fun main(args: Array<String>) = runBlocking<Unit> {
     val channel = Channel<Int>(4) // create buffered channel
-    launch(coroutineContext) { // launch sender coroutine
+    val sender = launch(coroutineContext) { // launch sender coroutine
         repeat(10) {
             println("Sending $it") // print before sending each element
             channel.send(it) // will suspend when buffer is full
@@ -30,4 +33,5 @@ fun main(args: Array<String>) = runBlocking<Unit> {
     }
     // don't receive anything... just wait....
     delay(1000)
+    sender.cancelAndJoin()
 }

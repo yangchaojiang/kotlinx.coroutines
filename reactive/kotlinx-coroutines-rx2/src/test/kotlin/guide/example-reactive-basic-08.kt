@@ -18,6 +18,7 @@
 package guide.reactive.basic.example08
 
 import io.reactivex.subjects.BehaviorSubject
+import kotlinx.coroutines.experimental.cancelAndJoin
 import kotlinx.coroutines.experimental.launch
 import kotlinx.coroutines.experimental.runBlocking
 import kotlinx.coroutines.experimental.rx2.consumeEach
@@ -28,10 +29,11 @@ fun main(args: Array<String>) = runBlocking<Unit> {
     subject.onNext("one")
     subject.onNext("two")
     // now launch a coroutine to print the most recent update
-    launch(coroutineContext) { // use the context of the main thread for a coroutine
+    val consumer = launch(coroutineContext) { // use the context of the main thread for a coroutine
         subject.consumeEach { println(it) }
     }
     subject.onNext("three")
     subject.onNext("four")
     yield() // yield the main thread to the launched coroutine <--- HERE
+    consumer.cancelAndJoin()
 }

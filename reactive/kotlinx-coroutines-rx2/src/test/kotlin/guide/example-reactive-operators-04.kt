@@ -17,8 +17,11 @@
 // This file was automatically generated from coroutines-guide-reactive.md by Knit tool. Do not edit.
 package guide.reactive.operators.example04
 
-import kotlinx.coroutines.experimental.*
-import kotlinx.coroutines.experimental.reactive.*
+import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.launch
+import kotlinx.coroutines.experimental.reactive.consumeEach
+import kotlinx.coroutines.experimental.reactive.publish
+import kotlinx.coroutines.experimental.runBlocking
 import org.reactivestreams.Publisher
 import kotlin.coroutines.experimental.CoroutineContext
 
@@ -28,6 +31,7 @@ fun <T> Publisher<Publisher<T>>.merge(context: CoroutineContext) = publish<T>(co
           pub.consumeEach { send(it) } // resend all element from this publisher
       }
   }
+  coroutineContext.joinChildren()      // wait for all launched children to finish
 }
 
 fun rangeWithInterval(context: CoroutineContext, time: Long, start: Int, count: Int) = publish<Int>(context) {

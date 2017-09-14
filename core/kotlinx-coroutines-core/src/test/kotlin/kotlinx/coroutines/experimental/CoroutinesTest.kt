@@ -230,4 +230,23 @@ class CoroutinesTest : TestBase() {
         job.cancelAndJoin()
         finish(5)
     }
+
+    @Test(expected = IOException::class)
+    fun testCancelAndJoinChildCrash() = runBlocking {
+        expect(1)
+        val job = launch(coroutineContext, CoroutineStart.UNDISPATCHED) {
+            expect(2)
+            throw IOException("OK")
+        }
+        // now we have a failed job with IOException
+        expect(3)
+        try {
+            job.cancelAndJoin() // join should crash on child's exception
+            expectUnreached()
+        } catch (e: Exception) {
+            check(e is IOException)
+            check(e.message == "OK")
+            finish(4)
+        }
+    }
 }

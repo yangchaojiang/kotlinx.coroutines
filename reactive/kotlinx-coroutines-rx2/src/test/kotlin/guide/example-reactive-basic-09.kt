@@ -17,6 +17,7 @@
 // This file was automatically generated from coroutines-guide-reactive.md by Knit tool. Do not edit.
 package guide.reactive.basic.example09
 
+import kotlinx.coroutines.experimental.cancelAndJoin
 import kotlinx.coroutines.experimental.channels.ConflatedBroadcastChannel
 import kotlinx.coroutines.experimental.channels.consumeEach
 import kotlinx.coroutines.experimental.launch
@@ -28,10 +29,11 @@ fun main(args: Array<String>) = runBlocking<Unit> {
     broadcast.offer("one")
     broadcast.offer("two")
     // now launch a coroutine to print the most recent update
-    launch(coroutineContext) { // use the context of the main thread for a coroutine
+    val consumer = launch(coroutineContext) { // use the context of the main thread for a coroutine
         broadcast.consumeEach { println(it) }
     }
     broadcast.offer("three")
     broadcast.offer("four")
     yield() // yield the main thread to the launched coroutine
+    consumer.cancelAndJoin()
 }

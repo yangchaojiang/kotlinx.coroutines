@@ -29,6 +29,7 @@ import kotlinx.coroutines.experimental.selects.select
 import java.util.concurrent.Future
 import kotlin.coroutines.experimental.Continuation
 import kotlin.coroutines.experimental.CoroutineContext
+import kotlin.coroutines.experimental.intrinsics.suspendCoroutineOrReturn
 
 // --------------- core job interfaces ---------------
 
@@ -127,9 +128,11 @@ public interface Job : CoroutineContext.Element {
     public val isCancelled: Boolean
 
     /**
-     * Returns the exception that signals the completion of this job -- it returns the original
-     * [cancel] cause or an instance of [JobCancellationException] if this job had completed
-     * normally or was cancelled without a cause. This function throws
+     * Returns the exception that signals the completion of this job --
+     * it returns either the original [cancel] cause,
+     * an instance of [JobCancellationException] if this job had was cancelled without a cause,
+     * or an instance of [JobCompletionException] if this job had completed normally.
+     * This function throws
      * [IllegalStateException] when invoked for an job that has not [completed][isCompleted] nor
      * [isCancelled] yet.
      *
@@ -163,11 +166,13 @@ public interface Job : CoroutineContext.Element {
 
     /**
      * Suspends coroutine until this job is complete. This invocation resumes normally (without exception)
-     * when the job is complete for any reason. This function also [starts][Job.start] the corresponding coroutine
-     * if the [Job] was still in _new_ state.
+     * when the job is complete for any reason and the [Job] of the invoking coroutine is still [active][isActive].
+     * This function also [starts][Job.start] the corresponding coroutine if the [Job] was still in _new_ state.
      *
-     * This suspending function is cancellable. If the [Job] of the invoking coroutine is cancelled or completed while this
-     * suspending function is suspended, this function immediately resumes with [CancellationException].
+     * This suspending function is cancellable and always checks for the cancellation of invoking coroutine's Job.
+     * If the [Job] of the invoking coroutine is cancelled or completed when this
+     * suspending function is invoked or while it is suspended, this function
+     * throws [CancellationException].
      *
      * This function can be used in [select] invocation with [onJoin] clause.
      * Use [isCompleted] to check for completion of this job without waiting.
@@ -324,30 +329,51 @@ public fun CancellationException(message: String, cause: Throwable) : Cancellati
     CancellationException(message).apply { initCause(cause) }
 
 /**
- * Thrown by cancellable suspending functions if the [Job] of the coroutine is cancelled while it is suspending.
+ * Thrown by cancellable suspending functions if the [Job] of the coroutine is cancelled without cause
+ * (see [Job.getCompletionException]).
  */
 public class JobCancellationException(
-    private val text: String,
+    message: String,
+    cause: Throwable? = null,
     /**
      * The job that was cancelled.
      */
-    public val job: Job,
-    cause: Throwable? = null
-) : CancellationException(text) {
+    public val job: Job
+) : CancellationException(message) {
     init { if (cause != null) initCause(cause) }
-    override fun toString(): String = "$text; job=$job"
-    override fun equals(other: Any?): Boolean =
-        other === this || other is JobCancellationException &&
-            text == other.text && job == other.job && cause == other.cause
-    override fun hashCode(): Int = (text.hashCode() * 31 + job.hashCode()) * 31 + (cause?.hashCode() ?: 0)
+    override fun toString(): String = "$message; job=$job"
+//    override fun equals(other: Any?): Boolean =
+//        other === this || other is JobCancellationException &&
+//            message == other.message && job == other.job && cause == other.cause
+//    override fun hashCode(): Int = (message!!.hashCode() * 31 + job.hashCode()) * 31 + (cause?.hashCode() ?: 0)
 }
+
+/**
+ * Thrown by cancellable suspending functions if the [Job] of the coroutine has completed normally
+ * (see [Job.getCompletionException]).
+ */
+public class JobCompletionException(
+    message: String,
+    /**
+     * The job that has completed.
+     */
+    public val job: Job
+) : IllegalStateException(message) {
+    override fun toString(): String = "$message; job=$job"
+//    override fun equals(other: Any?): Boolean =
+//        other === this || other is JobCompletionException &&
+//            message == other.message && job == other.job && cause == other.cause
+//    override fun hashCode(): Int = (message!!.hashCode() * 31 + job.hashCode()) * 31 + (cause?.hashCode() ?: 0)
+}
+
+public class ParentCancellationException(message: String, cause: Throwable?) : IllegalStateException(message, cause)
 
 /**
  * Represents an exception in the coroutine that was not caught by it and was not expected to be thrown.
  * This happens when coroutine is cancelled, but it completes with the different exception than its cancellation
  * cause was.
  */
-public class UnexpectedCoroutineException(message: String, cause: Throwable) : RuntimeException(message, cause)
+public class UnexpectedCoroutineException(message: String, cause: Throwable) : IllegalStateException(message, cause)
 
 /**
  * Unregisters a specified [registration] when this job is complete.
@@ -529,10 +555,13 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     protected open fun onParentCancellation(parent: Job, cause: Throwable?) {
         // Always materialized the actual instance of paren't completion exception
         val exception = parent.getCompletionException()
-        // create a new instance of CancellationException with the original exception as cause,
-        // unless the parent was also cancelled, in this case just keep this original exception
-        cancel(exception as? CancellationException ?:
-            JobCancellationException("Parent job has completed", this, exception))
+        // Keep original exception is parent was cancelled or crashed due to cancellation of its parent
+        if (exception is CancellationException || exception is ParentCancellationException) {
+            cancel(exception)
+            return
+        }
+        // create an instance of ParentCancellationException with the original exception as cause
+        cancel(ParentCancellationException("Parent job has failed or completed", exception))
     }
 
     // ------------ state query ------------
@@ -614,7 +643,8 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
      */
     protected fun completeUpdateState(expect: Any, update: Any?, mode: Int) {
         // Invoke completion handlers
-        val cause = (update as? CompletedExceptionally)?.cause
+        val exceptionally = update as? CompletedExceptionally
+        val cause = exceptionally?.cause
         when (expect) {
             is JobNode<*> -> try { // SINGLE/SINGLE+ state -- one completion handler (common case)
                 expect.invoke(cause)
@@ -627,7 +657,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
             else -> check(expect is Empty)
         }
         // Do overridable processing after completion handlers
-        if (expect !is Cancelling) onCancellation() // only notify when was not cancelling before
+        if (expect !is Cancelling) onCancellation(exceptionally) // only notify when was not cancelling before
         afterCompletion(update, mode)
     }
 
@@ -693,7 +723,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
             is Cancelling -> state.cancelled.exception
             is Incomplete -> error("Job was not completed or cancelled yet: $this")
             is CompletedExceptionally -> state.exception
-            else -> JobCancellationException("Job has completed normally", this)
+            else -> JobCompletionException("Job has completed normally", this)
         }
     }
 
@@ -782,7 +812,12 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     }
 
     final override suspend fun join() {
-        if (!joinInternal()) return // fast-path no wait
+        if (!joinInternal()) { // fast-path no wait
+            return suspendCoroutineOrReturn { cont ->
+                cont.context.checkCompletion()
+                Unit // do not suspend
+            }
+        }
         return joinSuspend() // slow-path wait
     }
 
@@ -807,8 +842,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
             if (select.isSelected) return
             if (state !is Incomplete) {
                 // already complete -- select result
-                if (select.trySelect(null))
+                if (select.trySelect(null)) {
+                    select.completion.context.checkCompletion() // always check for our completion
                     block.startCoroutineUndispatched(select.completion)
+                }
                 return
             }
             if (startInternal(state) == 0) {
@@ -877,9 +914,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
                 is NodeList -> { // LIST -- a list of completion handlers (either new or active)
                     if (state.isActive) {
                         // try make it cancelling on the condition that we're still in this state
-                        if (_state.compareAndSet(state, Cancelling(state, Cancelled(this, cause)))) {
+                        val cancelled = Cancelled(this, cause)
+                        if (_state.compareAndSet(state, Cancelling(state, cancelled))) {
                             notifyCancellation(state, cause)
-                            onCancellation()
+                            onCancellation(cancelled)
                             return true
                         }
                     } else {
@@ -906,12 +944,16 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     /**
      * It is invoked once when job is cancelled or is completed, similarly to [invokeOnCompletion] with
      * `onCancelling` set to `true`.
+     * @param exceptionally not null when the the job was cancelled or completed exceptionally,
+     *               null when it has completed normally.
+     * @suppress **This is unstable API and it is subject to change.**
      */
-    protected open fun onCancellation() {}
+    protected open fun onCancellation(exceptionally: CompletedExceptionally?) {}
 
     /**
      * Override for post-completion actions that need to do something with the state.
      * @param mode completion mode.
+     * @suppress **This is unstable API and it is subject to change.**
      */
     protected open fun afterCompletion(state: Any?, mode: Int) {}
 
@@ -1003,7 +1045,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         private val job: Job,
         cause: Throwable?
     ) : CompletedExceptionally(cause, true) {
-        override fun createException(): Throwable = JobCancellationException("Job was cancelled normally", job)
+        override fun createException(): Throwable = JobCancellationException("Job was cancelled normally", job = job)
     }
 
     /*
