@@ -151,7 +151,7 @@ public interface Job : CoroutineContext.Element {
     public fun start(): Boolean
 
     /**
-     * Cancel this job with an optional cancellation [cause]. The result is `true` if this job was
+     * Cancels this job with an optional cancellation [cause]. The result is `true` if this job was
      * cancelled as a result of this invocation and `false` otherwise
      * (if it was already _completed_ or if it is [NonCancellable]).
      * Repeated invocations of this function have no effect and always produce `false`.
@@ -161,6 +161,8 @@ public interface Job : CoroutineContext.Element {
      * both the context of cancellation and text description of the reason.
      */
     public fun cancel(cause: Throwable? = null): Boolean
+
+    public fun cancelChildren(cause: Throwable? = null)
 
     // ------------ state waiting ------------
 
@@ -341,7 +343,7 @@ public class JobCancellationException(
     public val job: Job
 ) : CancellationException(message) {
     init { if (cause != null) initCause(cause) }
-    override fun toString(): String = "$message; job=$job"
+    override fun toString(): String = "${super.toString()}; job=$job"
 //    override fun equals(other: Any?): Boolean =
 //        other === this || other is JobCancellationException &&
 //            message == other.message && job == other.job && cause == other.cause
@@ -359,7 +361,7 @@ public class JobCompletionException(
      */
     public val job: Job
 ) : IllegalStateException(message) {
-    override fun toString(): String = "$message; job=$job"
+    override fun toString(): String = "${super.toString()}; job=$job"
 //    override fun equals(other: Any?): Boolean =
 //        other === this || other is JobCompletionException &&
 //            message == other.message && job == other.job && cause == other.cause
@@ -422,6 +424,18 @@ public fun Job.cancelFutureOnCompletion(future: Future<*>): DisposableHandle =
 public suspend fun Job.cancelAndJoin() {
     cancel()
     return join()
+}
+
+/**
+ * Cancels [Job] of this context with an optional cancellation [cause]. The result is `true` if the job was
+ * cancelled as a result of this invocation and `false` is there is no job in the context or if it was already
+ * cancelled or completed. See [Job.cancel] for details.
+ */
+public fun CoroutineContext.cancel(cause: Throwable? = null): Boolean =
+    this[Job]?.cancel(cause) ?: false
+
+public fun CoroutineContext.cancelChildren(cause: Throwable? = null) {
+   this[Job]?.cancelChildren(cause)
 }
 
 /**
@@ -537,23 +551,26 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         }
         parent.start() // make sure the parent is started
         // directly pass HandlerNode to parent scope to optimize one closure object (see makeNode)
-        val newRegistration = parent.invokeOnCompletion(ParentOnCancellation(parent), onCancelling = true)
+        val newRegistration = parent.invokeOnCompletion(createParentCancellationHandler(parent), onCancelling = true)
         parentHandle = newRegistration
         // now check our state _after_ registering (see updateState order of actions)
         if (isCompleted) newRegistration.dispose()
     }
 
-    private inner class ParentOnCancellation(parent: Job) : JobCancellationNode<Job>(parent) {
-        override fun invokeOnce(reason: Throwable?) { onParentCancellation(job, reason) }
-        override fun toString(): String = "ParentOnCancellation[${this@JobSupport}]"
+    internal open fun createParentCancellationHandler(parent: Job): JobCancellationNode<*> =
+        ParentCancellation(parent)
+
+    private inner class ParentCancellation(parent: Job) : JobCancellationNode<Job>(parent) {
+        override fun invokeOnce(reason: Throwable?) { onParentCancellation(job) }
+        override fun toString(): String = "ParentCancellation[${this@JobSupport}]"
     }
 
     /**
      * Invoked at most once on parent completion.
      * @suppress **This is unstable API and it is subject to change.**
      */
-    protected open fun onParentCancellation(parent: Job, cause: Throwable?) {
-        // Always materialized the actual instance of paren't completion exception
+    internal fun onParentCancellation(parent: Job) {
+        // Always materialize the actual instance of parent's completion exception
         val exception = parent.getCompletionException()
         // Keep original exception is parent was cancelled or crashed due to cancellation of its parent
         if (exception is CancellationException || exception is ParentCancellationException) {
@@ -576,6 +593,9 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         }
     }
 
+    /**
+     * @suppress **This is unstable API and it is subject to change.**
+     */
     protected inline fun loopOnState(block: (Any?) -> Unit): Nothing {
         while (true) {
             block(state)
@@ -597,7 +617,16 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     // ------------ state update ------------
 
     /**
+     * Updates current [state] of this job when there are no active children left.
+     * @suppress **This is unstable API and it is subject to change.**
+     */
+    protected fun waitChildrenAndUpdateState(expect: Any, proposedUpdate: Any?, mode: Int): Boolean {
+        return updateState(expect, proposedUpdate, mode)
+    }
+
+    /**
      * Updates current [state] of this job.
+     * @suppress **This is unstable API and it is subject to change.**
      */
     protected fun updateState(expect: Any, proposedUpdate: Any?, mode: Int): Boolean {
         val update = coerceProposedUpdate(expect, proposedUpdate)
@@ -612,7 +641,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
 
     private fun unexpectedCause(proposedUpdate: CompletedExceptionally, update: Any?) =
         proposedUpdate !== update && (update !is CompletedExceptionally ||
-            // Equality comparison of exceptions by design -- see JobCancellationExceptions equality definition
+            // NOTE: equality comparison of exceptions is performed here by design
             proposedUpdate.cause != update.exception)
 
     // when Job is in Cancelling state, it can only be promoted to Cancelled state with the same cause
@@ -629,6 +658,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
 
     /**
      * Tries to initiate update of the current [state] of this job.
+     * @suppress **This is unstable API and it is subject to change.**
      */
     protected fun tryUpdateState(expect: Any, update: Any?): Boolean  {
         require(expect is Incomplete && update !is Incomplete) // only incomplete -> completed transition is allowed
@@ -640,6 +670,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
 
     /**
      * Completes update of the current [state] of this job.
+     * @suppress **This is unstable API and it is subject to change.**
      */
     protected fun completeUpdateState(expect: Any, update: Any?, mode: Int) {
         // Invoke completion handlers
@@ -933,6 +964,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         }
     }
 
+    override fun cancelChildren(cause: Throwable?) {
+        // nothing to do, cannot have children by default
+    }
+
     /**
      * Override to process any exceptions that were encountered while invoking completion handlers
      * installed via [invokeOnCompletion].
@@ -958,10 +993,23 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     protected open fun afterCompletion(state: Any?, mode: Int) {}
 
     // for nicer debugging
-    override fun toString(): String {
+    override final fun toString(): String =
+        "${nameString()}{${stateString()}}@${Integer.toHexString(System.identityHashCode(this))}"
+
+    /**
+     * @suppress **This is unstable API and it is subject to change.**
+     */
+    protected open fun nameString(): String = this::class.java.simpleName
+
+    private fun stateString(): String {
         val state = this.state
-        //val result = if (state is Incomplete) "" else "[$state]"
-        return "${this::class.java.simpleName}{${stateToString(state)}}@${Integer.toHexString(System.identityHashCode(this))}"
+        return when (state) {
+            is Cancelling -> "Cancelling"
+            is Incomplete -> if (state.isActive) "Active" else "New"
+            is Cancelled -> "Cancelled"
+            is CompletedExceptionally -> "CompletedExceptionally"
+            else -> "Completed"
+        }
     }
 
     /**
@@ -971,14 +1019,14 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         val isActive: Boolean
     }
 
-    private class Cancelling(
+    internal class Cancelling(
         @JvmField val list: NodeList,
         @JvmField val cancelled: Cancelled
     ) : Incomplete {
         override val isActive: Boolean get() = false
     }
 
-    private class NodeList(
+    internal class NodeList(
         active: Boolean
     ) : LockFreeLinkedListHead(), Incomplete {
         val _active = atomic(if (active) 1 else 0)
@@ -1123,11 +1171,6 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
             block.startCoroutineCancellable(state, select.completion)
     }
 }
-
-internal fun stateToString(state: Any?): String =
-    if (state is JobSupport.Incomplete)
-        if (state.isActive) "Active" else "New"
-    else "Completed"
 
 private const val RETRY = -1
 private const val FALSE = 0

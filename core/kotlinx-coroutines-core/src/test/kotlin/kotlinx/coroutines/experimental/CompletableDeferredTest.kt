@@ -48,7 +48,7 @@ class CompletableDeferredTest : TestBase() {
         assertThat(c.isCancelled, IsEqual(false))
         assertThat(c.isCompleted, IsEqual(true))
         assertThat(c.isCompletedExceptionally, IsEqual(false))
-        assertThat(c.getCompletionException(), IsInstanceOf(CancellationException::class.java))
+        assertThat(c.getCompletionException(), IsInstanceOf(JobCompletionException::class.java))
         assertThat(c.getCompleted(), IsEqual("OK"))
     }
 

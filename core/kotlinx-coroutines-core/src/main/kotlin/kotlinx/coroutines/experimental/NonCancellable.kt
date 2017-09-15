@@ -63,4 +63,7 @@ object NonCancellable : AbstractCoroutineContextElement(Job), Job {
 
     /** Always returns `false`. */
     override fun cancel(cause: Throwable?): Boolean = false
+
+    /** Does not do anything. */
+    override fun cancelChildren(cause: Throwable?) {}
 }

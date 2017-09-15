@@ -17,9 +17,12 @@
 // This file was automatically generated from coroutines-guide.md by Knit tool. Do not edit.
 package guide.select.example01
 
-import kotlinx.coroutines.experimental.*
-import kotlinx.coroutines.experimental.channels.*
-import kotlinx.coroutines.experimental.selects.*
+import kotlinx.coroutines.experimental.cancelAndJoin
+import kotlinx.coroutines.experimental.channels.ReceiveChannel
+import kotlinx.coroutines.experimental.channels.produce
+import kotlinx.coroutines.experimental.delay
+import kotlinx.coroutines.experimental.runBlocking
+import kotlinx.coroutines.experimental.selects.select
 import kotlin.coroutines.experimental.CoroutineContext
 
 fun fizz(context: CoroutineContext) = produce<String>(context) {
@@ -53,4 +56,6 @@ fun main(args: Array<String>) = runBlocking<Unit> {
     repeat(7) {
         selectFizzBuzz(fizz, buzz)
     }
+    fizz.cancelAndJoin()
+    buzz.cancelAndJoin()
 }

@@ -31,7 +31,6 @@ fun <T> Publisher<Publisher<T>>.merge(context: CoroutineContext) = publish<T>(co
           pub.consumeEach { send(it) } // resend all element from this publisher
       }
   }
-  coroutineContext.joinChildren()      // wait for all launched children to finish
 }
 
 fun rangeWithInterval(context: CoroutineContext, time: Long, start: Int, count: Int) = publish<Int>(context) {

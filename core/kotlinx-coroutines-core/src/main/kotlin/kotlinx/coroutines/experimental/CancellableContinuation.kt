@@ -258,7 +258,8 @@ internal class CancellableContinuationImpl<in T>(
         resumeWithExceptionImpl(exception, if (dc.dispatcher === this) MODE_UNDISPATCHED else resumeMode)
     }
 
-    override fun toString(): String = super.toString() + "[${delegate.toDebugString()}]"
+    override fun nameString(): String =
+        "CancellableContinuation(${delegate.toDebugString()})"
 }
 
 private class CompletedIdempotentResult(

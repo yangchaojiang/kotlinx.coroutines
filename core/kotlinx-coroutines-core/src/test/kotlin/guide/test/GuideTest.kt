@@ -197,7 +197,7 @@ class GuideTest {
     @Test
     fun testGuideContextExample05() {
         test("GuideContextExample05") { guide.context.example05.main(emptyArray()) }.also { lines ->
-            check(lines.size == 1 && lines[0].startsWith("My job is BlockingCoroutine{Active}@"))
+            check(lines.size == 1 && lines[0].startsWith("My job is \"coroutine#1\":BlockingCoroutine{Active}@"))
         }
     }
 
