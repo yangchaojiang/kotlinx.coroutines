@@ -64,6 +64,9 @@ object NonCancellable : AbstractCoroutineContextElement(Job), Job {
     /** Always returns `false`. */
     override fun cancel(cause: Throwable?): Boolean = false
 
+    /** Always returns [NonDisposableHandle] and does not do anything. */
+    override fun attachChild(child: Job): DisposableHandle = NonDisposableHandle
+
     /** Does not do anything. */
     override fun cancelChildren(cause: Throwable?) {}
 }

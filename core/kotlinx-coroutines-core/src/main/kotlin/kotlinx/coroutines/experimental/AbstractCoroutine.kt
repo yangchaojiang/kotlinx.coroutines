@@ -16,8 +16,6 @@
 
 package kotlinx.coroutines.experimental
 
-import kotlinx.coroutines.experimental.internal.LockFreeLinkedListNode
-import kotlinx.coroutines.experimental.internal.unwrap
 import kotlin.coroutines.experimental.Continuation
 import kotlin.coroutines.experimental.CoroutineContext
 
@@ -43,78 +41,14 @@ public abstract class AbstractCoroutine<in T>(
     // all coroutines are cancelled through an intermediate cancelling state
     final override val hasCancellingState: Boolean get() = true
 
-    override fun createParentCancellationHandler(parent: Job): JobCancellationNode<*> =
-        if (parent is AbstractCoroutine<*>) Child(parent, this)
-            else super.createParentCancellationHandler(parent)
-
-    final override fun resume(value: T) =
-        resumeImpl(value, null)
-
-    final override fun resumeWithException(exception: Throwable) =
-        resumeImpl(CompletedExceptionally(exception), null)
-
-    internal fun resumeImpl(proposedUpdate: Any?, lastNode: LockFreeLinkedListNode?) {
-        loopOnState { state ->
-            if (state !is Incomplete) error("Coroutine $this is already complete, but got resumed with $proposedUpdate")
-            // figure out if we need to wait for a child
-            val nextNode: LockFreeLinkedListNode? //
-            val waitChild: Child?
-            if (lastNode != null) {
-                nextNode = nextChildOrLast(lastNode)
-                waitChild = nextNode as? Child
-            } else when (state) {
-                is NodeList -> {
-                    nextNode = nextChildOrLast(state)
-                    waitChild = nextNode as? Child
-                }
-                is Cancelling -> {
-                    nextNode = nextChildOrLast(state.list)
-                    waitChild = nextNode as? Child
-                }
-                is Child -> {
-                    nextNode = null
-                    waitChild = state
-                }
-                else -> {
-                    nextNode = null
-                    waitChild = null
-                }
-            }
-            // wait for child if needed
-            if (waitChild != null) {
-                val child = waitChild.child
-                child.invokeOnCompletion(ChildCompletion(this, child, proposedUpdate, nextNode))
-                return
-            }
-            // no more children to wait --> try update state
-            if (updateState(state, proposedUpdate, MODE_ATOMIC_DEFAULT)) return
-        }
+    final override fun resume(value: T) {
+        if (!waitForChildrenAndUpdateState(value, null))
+            throw IllegalStateException("Coroutine $this is already complete, but got resumed with $value")
     }
 
-    private fun nextChildOrLast(start: LockFreeLinkedListNode): LockFreeLinkedListNode? {
-        var last = start // keep track of last non-removed node found
-        while (last.isRemoved) last = last.prev.unwrap() // rollback to prev non-removed (or list head)
-        var cur = last // now go forward
-        while (true) {
-            cur = cur.next.unwrap()
-            if (cur.isRemoved) continue
-            if (cur is Child) return cur
-            if (cur is NodeList) return last // checked all -- return last non-removed
-            last = cur
-        }
-    }
-
-    override fun cancelChildren(cause: Throwable?) {
-        val state = this.state
-        when (state) {
-            is NodeList -> cancelChildrenList(state, cause)
-            is Cancelling -> cancelChildrenList(state.list, cause)
-            is Child -> state.child.cancel(cause)
-        }
-    }
-
-    private fun cancelChildrenList(list: NodeList, cause: Throwable?) {
-        list.forEach<Child> { it.child.cancel(cause) }
+    final override fun resumeWithException(exception: Throwable) {
+        if (!waitForChildrenAndUpdateState(CompletedExceptionally(exception), null))
+            throw IllegalStateException("Coroutine $this is already complete, but got resumed with exception", exception)
     }
 
     final override fun handleException(exception: Throwable) {
@@ -127,21 +61,3 @@ public abstract class AbstractCoroutine<in T>(
     }
 }
 
-private class Child(
-    parent: AbstractCoroutine<*>,
-    val child: AbstractCoroutine<*>
-) : JobCancellationNode<AbstractCoroutine<*>>(parent) {
-    override fun invokeOnce(reason: Throwable?) { child.onParentCancellation(job) }
-    override fun toString(): String = "Child[$child]"
-}
-
-private class ChildCompletion(
-    private val parent: AbstractCoroutine<*>,
-    child: AbstractCoroutine<*>,
-    private val proposedUpdate: Any?,
-    private val nextNode: LockFreeLinkedListNode?
-) : JobNode<AbstractCoroutine<*>>(child) {
-    override fun invoke(reason: Throwable?) {
-        parent.resumeImpl(proposedUpdate, nextNode)
-    }
-}

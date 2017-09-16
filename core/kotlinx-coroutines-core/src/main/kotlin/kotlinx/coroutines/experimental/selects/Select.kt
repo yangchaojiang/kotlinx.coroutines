@@ -316,7 +316,8 @@ internal class SelectBuilderImpl<in R>(
     }
 
     private inner class SelectOnCancellation(job: Job) : JobCancellationNode<Job>(job) {
-        override fun invokeOnce(reason: Throwable?) {
+        // Note: may be invoked multiple times, but only the first trySelect succeeds anyway
+        override fun invoke(reason: Throwable?) {
             if (trySelect(null))
                 resumeSelectCancellableWithException(reason ?: CancellationException("Select was cancelled"))
         }

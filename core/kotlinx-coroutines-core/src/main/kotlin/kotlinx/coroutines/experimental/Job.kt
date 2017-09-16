@@ -21,6 +21,7 @@ import kotlinx.atomicfu.loop
 import kotlinx.coroutines.experimental.internal.LockFreeLinkedListHead
 import kotlinx.coroutines.experimental.internal.LockFreeLinkedListNode
 import kotlinx.coroutines.experimental.internal.OpDescriptor
+import kotlinx.coroutines.experimental.internal.unwrap
 import kotlinx.coroutines.experimental.intrinsics.startCoroutineUndispatched
 import kotlinx.coroutines.experimental.selects.SelectClause0
 import kotlinx.coroutines.experimental.selects.SelectClause1
@@ -161,6 +162,10 @@ public interface Job : CoroutineContext.Element {
      * both the context of cancellation and text description of the reason.
      */
     public fun cancel(cause: Throwable? = null): Boolean
+
+    // ------------ parent-child ------------
+
+    public fun attachChild(child: Job): DisposableHandle
 
     public fun cancelChildren(cause: Throwable? = null)
 
@@ -550,35 +555,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
             return
         }
         parent.start() // make sure the parent is started
-        // directly pass HandlerNode to parent scope to optimize one closure object (see makeNode)
-        val newRegistration = parent.invokeOnCompletion(createParentCancellationHandler(parent), onCancelling = true)
-        parentHandle = newRegistration
+        val handle = parent.attachChild(this)
+        parentHandle = handle
         // now check our state _after_ registering (see updateState order of actions)
-        if (isCompleted) newRegistration.dispose()
-    }
-
-    internal open fun createParentCancellationHandler(parent: Job): JobCancellationNode<*> =
-        ParentCancellation(parent)
-
-    private inner class ParentCancellation(parent: Job) : JobCancellationNode<Job>(parent) {
-        override fun invokeOnce(reason: Throwable?) { onParentCancellation(job) }
-        override fun toString(): String = "ParentCancellation[${this@JobSupport}]"
-    }
-
-    /**
-     * Invoked at most once on parent completion.
-     * @suppress **This is unstable API and it is subject to change.**
-     */
-    internal fun onParentCancellation(parent: Job) {
-        // Always materialize the actual instance of parent's completion exception
-        val exception = parent.getCompletionException()
-        // Keep original exception is parent was cancelled or crashed due to cancellation of its parent
-        if (exception is CancellationException || exception is ParentCancellationException) {
-            cancel(exception)
-            return
-        }
-        // create an instance of ParentCancellationException with the original exception as cause
-        cancel(ParentCancellationException("Parent job has failed or completed", exception))
+        if (isCompleted) handle.dispose()
     }
 
     // ------------ state query ------------
@@ -964,8 +944,74 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         }
     }
 
-    override fun cancelChildren(cause: Throwable?) {
-        // nothing to do, cannot have children by default
+    /**
+     * @suppress **This is unstable API and it is subject to change.**
+     */
+    internal fun waitForChildrenAndUpdateState(proposedUpdate: Any?, lastNode: LockFreeLinkedListNode?): Boolean {
+        loopOnState { state ->
+            if (state !is Incomplete) return false
+            // figure out if we need to wait for a child
+            val nextNode: LockFreeLinkedListNode?
+            val waitChild: Child?
+            if (lastNode != null) {
+                nextNode = nextChildOrLast(lastNode)
+                waitChild = nextNode as? Child
+            } else when (state) {
+                is NodeList -> {
+                    nextNode = nextChildOrLast(state)
+                    waitChild = nextNode as? Child
+                }
+                is Cancelling -> {
+                    nextNode = nextChildOrLast(state.list)
+                    waitChild = nextNode as? Child
+                }
+                is Child -> {
+                    nextNode = null
+                    waitChild = state
+                }
+                else -> {
+                    nextNode = null
+                    waitChild = null
+                }
+            }
+            // wait for child if needed
+            if (waitChild != null) {
+                val child = waitChild.child
+                child.invokeOnCompletion(ChildCompletion(this, child, proposedUpdate, nextNode))
+                return true // will complete later
+            }
+            // no more children to wait --> try update state
+            if (updateState(state, proposedUpdate, MODE_ATOMIC_DEFAULT)) return true
+        }
+    }
+
+    private fun nextChildOrLast(start: LockFreeLinkedListNode): LockFreeLinkedListNode? {
+        var last = start // keep track of last non-removed node found
+        while (last.isRemoved) last = last.prev.unwrap() // rollback to prev non-removed (or list head)
+        var cur = last // now go forward
+        while (true) {
+            cur = cur.next.unwrap()
+            if (cur.isRemoved) continue
+            if (cur is Child) return cur
+            if (cur is NodeList) return last // checked all -- return last non-removed
+            last = cur
+        }
+    }
+
+    override fun attachChild(child: Job): DisposableHandle =
+        invokeOnCompletion(Child(this, child), onCancelling = true)
+
+    public override fun cancelChildren(cause: Throwable?) {
+        val state = this.state
+        when (state) {
+            is NodeList -> cancelChildrenList(state, cause)
+            is Cancelling -> cancelChildrenList(state.list, cause)
+            is Child -> state.child.cancel(cause)
+        }
+    }
+
+    private fun cancelChildrenList(list: NodeList, cause: Throwable?) {
+        list.forEach<Child> { it.child.cancel(cause) }
     }
 
     /**
@@ -1019,14 +1065,14 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         val isActive: Boolean
     }
 
-    internal class Cancelling(
+    private class Cancelling(
         @JvmField val list: NodeList,
         @JvmField val cancelled: Cancelled
     ) : Incomplete {
         override val isActive: Boolean get() = false
     }
 
-    internal class NodeList(
+    private class NodeList(
         active: Boolean
     ) : LockFreeLinkedListHead(), Incomplete {
         val _active = atomic(if (active) 1 else 0)
@@ -1259,23 +1305,50 @@ private class SelectAwaitOnCompletion<R>(
 
 // -------- invokeOnCancellation nodes
 
-internal abstract class JobCancellationNode<out J : Job>(job: J) : JobNode<J>(job) {
-    // shall be invoked at most once, so here is an additional flag
-    private val _invoked = atomic(0)
-
-    final override fun invoke(reason: Throwable?) {
-        if (_invoked.compareAndSet(0, 1)) invokeOnce(reason)
-    }
-
-    abstract fun invokeOnce(reason: Throwable?)
-}
+/**
+ * Marker for node that shall be invoked on cancellation (in _cancelling_ state).
+ * **Note: may be invoked multiple times during cancellation.**
+ */
+internal abstract class JobCancellationNode<out J : Job>(job: J) : JobNode<J>(job)
 
 private class InvokeOnCancellation(
     job: Job,
     private val handler: CompletionHandler
 ) : JobCancellationNode<Job>(job)  {
-    override fun invokeOnce(reason: Throwable?) = handler.invoke(reason)
+    // delegate handler shall be invoked at most once, so here is an additional flag
+    private val _invoked = atomic(0)
+    override fun invoke(reason: Throwable?) {
+        if (_invoked.compareAndSet(0, 1)) handler.invoke(reason)
+    }
     override fun toString() = "InvokeOnCancellation[${handler::class.java.name}@${Integer.toHexString(System.identityHashCode(handler))}]"
 }
 
+private class Child(
+    parent: JobSupport,
+    val child: Job
+) : JobCancellationNode<JobSupport>(parent) {
+    override fun invoke(reason: Throwable?) {
+        // Always materialize the actual instance of parent's completion exception
+        val exception = job.getCompletionException()
+        // Keep original exception is parent was cancelled or crashed due to cancellation of its parent
+        if (exception is CancellationException || exception is ParentCancellationException) {
+            child.cancel(exception)
+            return
+        }
+        // create an instance of ParentCancellationException with the original exception as cause
+        child.cancel(ParentCancellationException("Parent job has failed or completed", exception))
+    }
+    override fun toString(): String = "Child[$child]"
+}
+
+private class ChildCompletion(
+    private val parent: JobSupport,
+    child: Job,
+    private val proposedUpdate: Any?,
+    private val nextNode: LockFreeLinkedListNode?
+) : JobNode<Job>(child) {
+    override fun invoke(reason: Throwable?) {
+        parent.waitForChildrenAndUpdateState(proposedUpdate, nextNode)
+    }
+}
 
