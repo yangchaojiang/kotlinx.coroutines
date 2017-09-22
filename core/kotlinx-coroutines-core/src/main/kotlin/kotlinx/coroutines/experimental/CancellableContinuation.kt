@@ -245,7 +245,7 @@ internal class CancellableContinuationImpl<in T>(
     }
 
     override fun completeResume(token: Any) {
-        completeUpdateState(token, state, resumeMode)
+        completeUpdateState(token as Incomplete, state, resumeMode)
     }
 
     override fun CoroutineDispatcher.resumeUndispatched(value: T) {

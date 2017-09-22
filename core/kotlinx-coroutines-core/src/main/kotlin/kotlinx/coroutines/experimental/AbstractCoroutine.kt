@@ -41,14 +41,14 @@ public abstract class AbstractCoroutine<in T>(
     // all coroutines are cancelled through an intermediate cancelling state
     final override val hasCancellingState: Boolean get() = true
 
+    protected open val defaultResumeMode: Int get() = MODE_ATOMIC_DEFAULT
+
     final override fun resume(value: T) {
-        if (!waitForChildrenAndUpdateState(value, null))
-            throw IllegalStateException("Coroutine $this is already complete, but got resumed with $value")
+        makeCompleting(value, defaultResumeMode)
     }
 
     final override fun resumeWithException(exception: Throwable) {
-        if (!waitForChildrenAndUpdateState(CompletedExceptionally(exception), null))
-            throw IllegalStateException("Coroutine $this is already complete, but got resumed with exception", exception)
+        makeCompleting(CompletedExceptionally(exception), defaultResumeMode)
     }
 
     final override fun handleException(exception: Throwable) {

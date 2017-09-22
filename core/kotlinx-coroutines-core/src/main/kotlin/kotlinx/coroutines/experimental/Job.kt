@@ -49,6 +49,7 @@ import kotlin.coroutines.experimental.intrinsics.suspendCoroutineOrReturn
  * | --------------------------------------- | ---------- | ------------- | ------------- |
  * | _New_ (optional initial state)          | `false`    | `false`       | `false`       |
  * | _Active_ (default initial state)        | `true`     | `false`       | `false`       |
+ * | _Completing_ (optional transient state) | `false`    | `false`       | `false`       |
  * | _Cancelling_ (optional transient state) | `false`    | `false`       | `true`        |
  * | _Cancelled_ (final state)               | `false`    | `true`        | `true`        |
  * | _Completed normally_ (final state)      | `false`    | `true`        | `false`       |
@@ -58,30 +59,31 @@ import kotlin.coroutines.experimental.intrinsics.suspendCoroutineOrReturn
  * [CoroutineStart.LAZY]. Such a job can be made _active_ by invoking [start] or [join].
  *
  * A job can be _cancelled_ at any time with [cancel] function that forces it to transition to
- * _cancelling_ state immediately. Simple jobs, that are not backed by a coroutine, like
- * [CompletableDeferred] and the result of `Job()` factory function, don't
- * have a _cancelling_ state, but become _cancelled_ on [cancel] immediately.
- * Coroutines, on the other hand, become _cancelled_ only when they finish executing their code.
+ * _cancelling_ state immediately. Job that is not backed by a coroutine and does not have
+ * [children][attachChild] becomes _cancelled_ on [cancel] immediately.
+ * Otherwise, job becomes _cancelled_  when it finishes executing its code and
+ * when all its children [complete][isCompleted].
  *
  * ```
- *    +-----+       start      +--------+   complete   +-----------+
- *    | New | ---------------> | Active | -----------> | Completed |
- *    +-----+                  +--------+              | normally  |
- *       |                         |                   +-----------+
- *       | cancel                  | cancel
- *       V                         V
- *  +-----------+   finish   +------------+
- *  | Cancelled | <--------- | Cancelling |
+ *                                                      wait children
+ *    +-----+       start      +--------+   complete   +-------------+  finish  +-----------+
+ *    | New | ---------------> | Active | -----------> | Completing  | -------> | Completed |
+ *    +-----+                  +--------+              +-------------+          | normally  |
+ *       |                         |                         |                  +-----------+
+ *       | cancel                  | cancel                  | cancel
+ *       V                         V                         |
+ *  +-----------+   finish   +------------+                  |
+ *  | Cancelled | <--------- | Cancelling | <----------------+
  *  |(completed)|            +------------+
  *  +-----------+
  * ```
  *
- * A job in the coroutine [context][CoroutineScope.context] represents the coroutine itself.
+ * A job in the [coroutineContext][CoroutineScope.coroutineContext] represents the coroutine itself.
  * A job is active while the coroutine is working and job's cancellation aborts the coroutine when
- * the coroutine is suspended on a _cancellable_ suspension point by throwing [CancellationException]
- * or the cancellation cause inside the coroutine.
+ * the coroutine is suspended on a _cancellable_ suspension point by throwing [CancellationException].
  *
  * A job can have a _parent_ job. A job with a parent is cancelled when its parent is cancelled or completes.
+ * Parent job waits for all its [children][attachChild] to complete in _completing_ or _cancelling_ state.
  *
  * All functions on this interface and on all interfaces derived from it are **thread-safe** and can
  * be safely invoked from concurrent coroutines without external synchronization.
@@ -118,7 +120,8 @@ public interface Job : CoroutineContext.Element {
 
     /**
      * Returns `true` when this job has completed for any reason. A job that was cancelled and has
-     * finished its execution is also considered complete.
+     * finished its execution is also considered complete. Job becomes complete only after
+     * all its [children][attachChild] complete.
      */
     public val isCompleted: Boolean
 
@@ -165,8 +168,21 @@ public interface Job : CoroutineContext.Element {
 
     // ------------ parent-child ------------
 
+    /**
+     * Attaches child job so that this job becomes its parent and
+     * returns a handle that can be used to detach it.
+     *
+     * A parent-child relation has the following effect:
+     * * Cancellation of parent with [cancel] immediately cancels all its children with the same cause.
+     * * Parent cannot complete until all its children are complete. Parent waits for all its children to
+     *   complete first in _completing_ or _cancelling_ state.
+     */
     public fun attachChild(child: Job): DisposableHandle
 
+    /**
+     * Cancels all [children][attachChild] jobs of this coroutine with the given [cause]. Unlike [cancel],
+     * the state of this job itself is not affected.
+     */
     public fun cancelChildren(cause: Throwable? = null)
 
     // ------------ state waiting ------------
@@ -349,10 +365,6 @@ public class JobCancellationException(
 ) : CancellationException(message) {
     init { if (cause != null) initCause(cause) }
     override fun toString(): String = "${super.toString()}; job=$job"
-//    override fun equals(other: Any?): Boolean =
-//        other === this || other is JobCancellationException &&
-//            message == other.message && job == other.job && cause == other.cause
-//    override fun hashCode(): Int = (message!!.hashCode() * 31 + job.hashCode()) * 31 + (cause?.hashCode() ?: 0)
 }
 
 /**
@@ -367,10 +379,6 @@ public class JobCompletionException(
     public val job: Job
 ) : IllegalStateException(message) {
     override fun toString(): String = "${super.toString()}; job=$job"
-//    override fun equals(other: Any?): Boolean =
-//        other === this || other is JobCompletionException &&
-//            message == other.message && job == other.job && cause == other.cause
-//    override fun hashCode(): Int = (message!!.hashCode() * 31 + job.hashCode()) * 31 + (cause?.hashCode() ?: 0)
 }
 
 public class ParentCancellationException(message: String, cause: Throwable?) : IllegalStateException(message, cause)
@@ -591,24 +599,16 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
 
     public final override val isCancelled: Boolean get() {
         val state = this.state
-        return state is Cancelled || state is Cancelling
+        return state is Cancelled || (state is Finishing && state.cancelled != null)
     }
 
     // ------------ state update ------------
 
     /**
-     * Updates current [state] of this job when there are no active children left.
+     * Updates current [state] of this job. Returns `false` if current state is not equal to expected.
      * @suppress **This is unstable API and it is subject to change.**
      */
-    protected fun waitChildrenAndUpdateState(expect: Any, proposedUpdate: Any?, mode: Int): Boolean {
-        return updateState(expect, proposedUpdate, mode)
-    }
-
-    /**
-     * Updates current [state] of this job.
-     * @suppress **This is unstable API and it is subject to change.**
-     */
-    protected fun updateState(expect: Any, proposedUpdate: Any?, mode: Int): Boolean {
+    internal fun updateState(expect: Incomplete, proposedUpdate: Any?, mode: Int): Boolean {
         val update = coerceProposedUpdate(expect, proposedUpdate)
         if (!tryUpdateState(expect, update)) return false
         completeUpdateState(expect, update, mode)
@@ -626,22 +626,22 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
 
     // when Job is in Cancelling state, it can only be promoted to Cancelled state with the same cause
     // however, null cause can be replaced with more specific CancellationException (that contains stack trace)
-    private fun coerceProposedUpdate(expect: Any, proposedUpdate: Any?): Any? =
-        if (expect is Cancelling && !correspondinglyCancelled(expect, proposedUpdate))
+    private fun coerceProposedUpdate(expect: Incomplete, proposedUpdate: Any?): Any? =
+        if (expect is Finishing && expect.cancelled != null && !correspondinglyCancelled(expect.cancelled, proposedUpdate))
             expect.cancelled else proposedUpdate
 
-    private fun correspondinglyCancelled(expect: Cancelling, proposedUpdate: Any?): Boolean {
+    private fun correspondinglyCancelled(cancelled: Cancelled, proposedUpdate: Any?): Boolean {
         if (proposedUpdate !is Cancelled) return false
-        return proposedUpdate.cause === expect.cancelled.cause ||
-            proposedUpdate.cause is CancellationException && expect.cancelled.cause == null
+        return proposedUpdate.cause === cancelled.cause ||
+            proposedUpdate.cause is CancellationException && cancelled.cause == null
     }
 
     /**
      * Tries to initiate update of the current [state] of this job.
      * @suppress **This is unstable API and it is subject to change.**
      */
-    protected fun tryUpdateState(expect: Any, update: Any?): Boolean  {
-        require(expect is Incomplete && update !is Incomplete) // only incomplete -> completed transition is allowed
+    internal fun tryUpdateState(expect: Incomplete, update: Any?): Boolean  {
+        require(update !is Incomplete) // only incomplete -> completed transition is allowed
         if (!_state.compareAndSet(expect, update)) return false
         // Unregister from parent job
         parentHandle?.dispose() // volatile read parentHandle _after_ state was updated
@@ -652,23 +652,21 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
      * Completes update of the current [state] of this job.
      * @suppress **This is unstable API and it is subject to change.**
      */
-    protected fun completeUpdateState(expect: Any, update: Any?, mode: Int) {
+    internal fun completeUpdateState(expect: Incomplete, update: Any?, mode: Int) {
         // Invoke completion handlers
         val exceptionally = update as? CompletedExceptionally
         val cause = exceptionally?.cause
-        when (expect) {
-            is JobNode<*> -> try { // SINGLE/SINGLE+ state -- one completion handler (common case)
+        if (expect is JobNode<*>) { // SINGLE/SINGLE+ state -- one completion handler (common case)
+            try {
                 expect.invoke(cause)
             } catch (ex: Throwable) {
                 handleException(CompletionHandlerException("Exception in completion handler $expect for $this", ex))
             }
-            is NodeList -> notifyCompletion(expect, cause) // LIST state -- a list of completion handlers
-            is Cancelling -> notifyCompletion(expect.list, cause) // has list, too
-            // otherwise -- do nothing (it was Empty*)
-            else -> check(expect is Empty)
+        } else {
+            expect.list?.notifyCompletion(cause)
         }
         // Do overridable processing after completion handlers
-        if (expect !is Cancelling) onCancellation(exceptionally) // only notify when was not cancelling before
+        if (!expect.isCancelling) onCancellation(exceptionally) // only notify when was not cancelling before
         afterCompletion(update, mode)
     }
 
@@ -686,8 +684,8 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         exception?.let { handleException(it) }
     }
 
-    private fun notifyCompletion(list: NodeList, cause: Throwable?) =
-        notifyHandlers<JobNode<*>>(list, cause)
+    private fun NodeList.notifyCompletion(cause: Throwable?) =
+        notifyHandlers<JobNode<*>>(this, cause)
 
     private fun notifyCancellation(list: NodeList, cause: Throwable?) =
         notifyHandlers<JobCancellationNode<*>>(list, cause)
@@ -730,10 +728,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
 
     public final override fun getCompletionException(): Throwable  {
         val state = this.state
-        return when (state) {
-            is Cancelling -> state.cancelled.exception
-            is Incomplete -> error("Job was not completed or cancelled yet: $this")
-            is CompletedExceptionally -> state.exception
+        return when {
+            state is Finishing && state.cancelled != null -> state.cancelled.exception
+            state is Incomplete -> error("Job was not completed or cancelled yet: $this")
+            state is CompletedExceptionally -> state.exception
             else -> JobCompletionException("Job has completed normally", this)
         }
     }
@@ -747,10 +745,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
      */
     protected fun getCompletionCause(): Throwable? {
         val state = this.state
-        return when (state) {
-            is Cancelling -> state.cancelled.cause
-            is Incomplete -> error("Job was not completed or cancelled yet")
-            is CompletedExceptionally -> state.cause
+        return when {
+            state is Finishing && state.cancelled != null -> state.cancelled.cause
+            state is Incomplete -> error("Job was not completed or cancelled yet")
+            state is CompletedExceptionally -> state.cause
             else -> null
         }
     }
@@ -773,22 +771,21 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
                     } else
                         promoteEmptyToNodeList(state) // that way we can add listener for non-active coroutine
                 }
-                is JobNode<*> -> { // SINGLE/SINGLE+ state -- one completion handler
-                    promoteSingleToNodeList(state)
-                }
-                is NodeList -> { // LIST -- a list of completion handlers (either new or active)
-                    val node = nodeCache ?: makeNode(handler, onCancelling).also { nodeCache = it }
-                    if (addLastAtomic(state, state, node)) return node
-                }
-                is Cancelling -> { // CANCELLING -- has a list of completion handlers
-                    if (onCancelling) { // installing cancellation handler on job that is being cancelled
-                        handler((state as? CompletedExceptionally)?.exception)
-                        return NonDisposableHandle
+                is Incomplete -> {
+                    val list = state.list
+                    if (list == null) { // SINGLE/SINGLE+
+                        promoteSingleToNodeList(state as JobNode<*>)
+                    } else {
+                        if (state is Finishing && state.cancelled != null && onCancelling) {
+                            // installing cancellation handler on job that is being cancelled
+                            handler((state as? CompletedExceptionally)?.exception)
+                            return NonDisposableHandle
+                        }
+                        val node = nodeCache ?: makeNode(handler, onCancelling).also { nodeCache = it }
+                        if (addLastAtomic(state, list, node)) return node
                     }
-                    val node = nodeCache ?: makeNode(handler, onCancelling).also { nodeCache = it }
-                    if (addLastAtomic(state, state.list, node)) return node
                 }
-                else -> { // is inactive
+                else -> { // is complete
                     handler((state as? CompletedExceptionally)?.exception)
                     return NonDisposableHandle
                 }
@@ -876,12 +873,12 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
                     // try remove and revert back to empty state
                     if (_state.compareAndSet(state, EmptyActive)) return
                 }
-                is NodeList, is Cancelling -> { // LIST or CANCELLING -- a list of completion handlers
-                    // remove node from the list
-                    node.remove()
+                is Incomplete -> { // may have a list of completion handlers
+                    // remove node from the list if there is a list
+                    if (state.list != null) node.remove()
                     return
                 }
-                else -> return // it is inactive or Empty* (does not have any completion handlers)
+                else -> return // it is complete and does not have any completion handlers
             }
         }
     }
@@ -924,77 +921,94 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
                 }
                 is NodeList -> { // LIST -- a list of completion handlers (either new or active)
                     if (state.isActive) {
-                        // try make it cancelling on the condition that we're still in this state
-                        val cancelled = Cancelled(this, cause)
-                        if (_state.compareAndSet(state, Cancelling(state, cancelled))) {
-                            notifyCancellation(state, cause)
-                            onCancellation(cancelled)
-                            return true
-                        }
+                        if (tryMakeCancelling(state, state.list, cause)) return true
                     } else {
                         // cancelling a non-started coroutine makes it immediately cancelled
                         if (updateStateCancelled(state, cause))
                             return true
                     }
                 }
-                else -> { // is inactive or already cancelling
+                is Finishing -> { // Completing/Cancelling the job, may cancel
+                    if (state.cancelled != null) return false // already cancelling
+                    if (tryMakeCancelling(state, state.list, cause)) return true
+                }
+                else -> { // is inactive
                     return false
                 }
             }
         }
     }
 
+    // try make expected state in cancelling on the condition that we're still in this state
+    private fun tryMakeCancelling(expect: Incomplete, list: NodeList, cause: Throwable?): Boolean {
+        val cancelled = Cancelled(this, cause)
+        if (!_state.compareAndSet(expect, Finishing(list, cancelled, false))) return false
+        notifyCancellation(list, cause)
+        onCancellation(cancelled)
+        return true
+    }
+
     /**
+     * Returns:
+     * * `true` if state was updated to completed/cancelled;
+     * * `false` if made completing or it is cancelling and is waiting for children.
+     *
+     * @throws IllegalStateException if job is already complete or completing
      * @suppress **This is unstable API and it is subject to change.**
      */
-    internal fun waitForChildrenAndUpdateState(proposedUpdate: Any?, lastNode: LockFreeLinkedListNode?): Boolean {
+    internal fun makeCompleting(proposedUpdate: Any?, mode: Int): Boolean {
         loopOnState { state ->
-            if (state !is Incomplete) return false
-            // figure out if we need to wait for a child
-            val nextNode: LockFreeLinkedListNode?
-            val waitChild: Child?
-            if (lastNode != null) {
-                nextNode = nextChildOrLast(lastNode)
-                waitChild = nextNode as? Child
-            } else when (state) {
-                is NodeList -> {
-                    nextNode = nextChildOrLast(state)
-                    waitChild = nextNode as? Child
-                }
-                is Cancelling -> {
-                    nextNode = nextChildOrLast(state.list)
-                    waitChild = nextNode as? Child
-                }
-                is Child -> {
-                    nextNode = null
-                    waitChild = state
-                }
-                else -> {
-                    nextNode = null
-                    waitChild = null
+            if (state !is Incomplete)
+                throw IllegalStateException("Job $this is already complete, but is being completed with $proposedUpdate", proposedUpdate.exception)
+            if (state is Finishing && state.completing)
+                throw IllegalStateException("Job $this is already completing, but is being completed with $proposedUpdate", proposedUpdate.exception)
+            val waitChild: Child = firstChild(state) ?: // or else complete immediately
+                if (updateState(state, proposedUpdate, mode)) return true else return@loopOnState
+            // switch to completing state
+            if (state is JobNode<*>) {
+                // must promote to list to make completing & retry
+                promoteSingleToNodeList(state)
+            } else {
+                val completing = Finishing(state.list!!, (state as? Finishing)?.cancelled, true)
+                if (_state.compareAndSet(state, completing)) {
+                    waitForChild(waitChild, proposedUpdate)
+                    return false
                 }
             }
-            // wait for child if needed
-            if (waitChild != null) {
-                val child = waitChild.child
-                child.invokeOnCompletion(ChildCompletion(this, child, proposedUpdate, nextNode))
-                return true // will complete later
-            }
-            // no more children to wait --> try update state
-            if (updateState(state, proposedUpdate, MODE_ATOMIC_DEFAULT)) return true
         }
     }
 
-    private fun nextChildOrLast(start: LockFreeLinkedListNode): LockFreeLinkedListNode? {
-        var last = start // keep track of last non-removed node found
-        while (last.isRemoved) last = last.prev.unwrap() // rollback to prev non-removed (or list head)
-        var cur = last // now go forward
+    private val Any?.exception: Throwable?
+        get() = (this as? CompletedExceptionally)?.exception
+
+    private fun firstChild(state: Incomplete) =
+        if (state is Child) state else state.list?.nextChild()
+
+    private fun waitForChild(waitChild: Child, proposedUpdate: Any?) {
+        waitChild.child.invokeOnCompletion(ChildCompletion(this, waitChild, proposedUpdate))
+    }
+
+    internal fun continueCompleting(lastChild: Child, proposedUpdate: Any?) {
+        loopOnState { state ->
+            if (state !is Finishing)
+                throw IllegalStateException("Job $this is found in expected state while completing with $proposedUpdate", proposedUpdate.exception)
+            // figure out if we need to wait for next child
+            val waitChild = lastChild.nextChild() ?: // or else no more children
+                if (updateState(state, proposedUpdate, MODE_ATOMIC_DEFAULT)) return else return@loopOnState
+            // wait for next child
+            waitForChild(waitChild, proposedUpdate)
+            return
+        }
+    }
+
+    private fun LockFreeLinkedListNode.nextChild(): Child? {
+        var cur = this
+        while (cur.isRemoved) cur = cur.prev.unwrap() // rollback to prev non-removed (or list head)
         while (true) {
             cur = cur.next.unwrap()
             if (cur.isRemoved) continue
             if (cur is Child) return cur
-            if (cur is NodeList) return last // checked all -- return last non-removed
-            last = cur
+            if (cur is NodeList) return null // checked all -- no more children
         }
     }
 
@@ -1004,14 +1018,13 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     public override fun cancelChildren(cause: Throwable?) {
         val state = this.state
         when (state) {
-            is NodeList -> cancelChildrenList(state, cause)
-            is Cancelling -> cancelChildrenList(state.list, cause)
             is Child -> state.child.cancel(cause)
+            is Incomplete -> state.list?.cancelChildrenList(cause)
         }
     }
 
-    private fun cancelChildrenList(list: NodeList, cause: Throwable?) {
-        list.forEach<Child> { it.child.cancel(cause) }
+    private fun NodeList.cancelChildrenList(cause: Throwable?) {
+        forEach<Child> { it.child.cancel(cause) }
     }
 
     /**
@@ -1050,7 +1063,10 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     private fun stateString(): String {
         val state = this.state
         return when (state) {
-            is Cancelling -> "Cancelling"
+            is Finishing -> buildString {
+                if (state.cancelled != null) append("Cancelling")
+                if (state.completing) append("Completing")
+            }
             is Incomplete -> if (state.isActive) "Active" else "New"
             is Cancelled -> "Cancelled"
             is CompletedExceptionally -> "CompletedExceptionally"
@@ -1059,25 +1075,35 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
     }
 
     /**
-     * Interface for incomplete [state] of a job.
+     * @suppress **This is unstable API and it is subject to change.**
      */
-    public interface Incomplete {
+    internal interface Incomplete {
         val isActive: Boolean
+        val list: NodeList? // is null only for Empty and JobNode incomplete state objects
     }
 
-    private class Cancelling(
-        @JvmField val list: NodeList,
-        @JvmField val cancelled: Cancelled
+    // Cancelling or Completing (or both)
+    private class Finishing(
+        override val list: NodeList,
+        @JvmField val cancelled: Cancelled?, /* != null when cancelling */
+        @JvmField val completing: Boolean /* true when completing */
     ) : Incomplete {
         override val isActive: Boolean get() = false
     }
 
-    private class NodeList(
+    private val Incomplete.isCancelling: Boolean
+        get() = this is Finishing && cancelled != null
+
+    /**
+     * @suppress **This is unstable API and it is subject to change.**
+     */
+    internal class NodeList(
         active: Boolean
     ) : LockFreeLinkedListHead(), Incomplete {
         val _active = atomic(if (active) 1 else 0)
 
         override val isActive: Boolean get() = _active.value != 0
+        override val list: NodeList get() = this
 
         override fun toString(): String = buildString {
             append("List")
@@ -1226,6 +1252,7 @@ private val EmptyNew = Empty(false)
 private val EmptyActive = Empty(true)
 
 private class Empty(override val isActive: Boolean) : JobSupport.Incomplete {
+    override val list: JobSupport.NodeList? get() = null
     override fun toString(): String = "Empty{${if (isActive) "Active" else "New" }}"
 }
 
@@ -1239,6 +1266,7 @@ internal abstract class JobNode<out J : Job>(
     @JvmField val job: J
 ) : LockFreeLinkedListNode(), DisposableHandle, CompletionHandler, JobSupport.Incomplete {
     final override val isActive: Boolean get() = true
+    final override val list: JobSupport.NodeList? get() = null
     final override fun dispose() = (job as JobSupport).removeNode(this)
     override abstract fun invoke(reason: Throwable?)
 }
@@ -1323,7 +1351,7 @@ private class InvokeOnCancellation(
     override fun toString() = "InvokeOnCancellation[${handler::class.java.name}@${Integer.toHexString(System.identityHashCode(handler))}]"
 }
 
-private class Child(
+internal class Child(
     parent: JobSupport,
     val child: Job
 ) : JobCancellationNode<JobSupport>(parent) {
@@ -1343,12 +1371,11 @@ private class Child(
 
 private class ChildCompletion(
     private val parent: JobSupport,
-    child: Job,
-    private val proposedUpdate: Any?,
-    private val nextNode: LockFreeLinkedListNode?
-) : JobNode<Job>(child) {
+    private val waitChild: Child,
+    private val proposedUpdate: Any?
+) : JobNode<Job>(waitChild.child) {
     override fun invoke(reason: Throwable?) {
-        parent.waitForChildrenAndUpdateState(proposedUpdate, nextNode)
+        parent.continueCompleting(waitChild, proposedUpdate)
     }
 }
 
