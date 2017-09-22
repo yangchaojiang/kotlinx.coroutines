@@ -49,7 +49,7 @@ import kotlin.coroutines.experimental.intrinsics.suspendCoroutineOrReturn
  * | --------------------------------------- | ---------- | ------------- | ------------- |
  * | _New_ (optional initial state)          | `false`    | `false`       | `false`       |
  * | _Active_ (default initial state)        | `true`     | `false`       | `false`       |
- * | _Completing_ (optional transient state) | `false`    | `false`       | `false`       |
+ * | _Completing_ (optional transient state) | `true`     | `false`       | `false`       |
  * | _Cancelling_ (optional transient state) | `false`    | `false`       | `true`        |
  * | _Cancelled_ (final state)               | `false`    | `true`        | `true`        |
  * | _Completed normally_ (final state)      | `false`    | `true`        | `false`       |
@@ -1088,7 +1088,7 @@ public open class JobSupport(active: Boolean) : Job, SelectClause0, SelectClause
         @JvmField val cancelled: Cancelled?, /* != null when cancelling */
         @JvmField val completing: Boolean /* true when completing */
     ) : Incomplete {
-        override val isActive: Boolean get() = false
+        override val isActive: Boolean get() = cancelled == null
     }
 
     private val Incomplete.isCancelling: Boolean
