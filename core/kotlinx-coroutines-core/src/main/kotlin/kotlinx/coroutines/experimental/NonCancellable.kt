@@ -53,7 +53,7 @@ object NonCancellable : AbstractCoroutineContextElement(Job), Job {
         get() = throw UnsupportedOperationException("This job is always active")
 
     /** Always throws [IllegalStateException]. */
-    override fun getCompletionException(): CancellationException = throw IllegalStateException("This job is always active")
+    override fun getCancellationException(): CancellationException = throw IllegalStateException("This job is always active")
 
     /** Always returns [NonDisposableHandle]. */
     override fun invokeOnCompletion(handler: CompletionHandler): DisposableHandle = NonDisposableHandle

@@ -256,7 +256,14 @@ class CoroutinesTest : TestBase() {
         }
         // now we have a failed job with IOException
         finish(3)
-        job.cancelAndJoin() // join should crash on child's exception
+        try {
+            job.cancelAndJoin() // join should crash on child's exception but it will be wrapped into JobCancellationException
+        } catch (e: Throwable) {
+            e as JobCancellationException // type assertion
+            check(e.cause is IOException)
+            check(e.job === coroutineContext[Job])
+            throw e
+        }
         expectUnreached()
     }
 }

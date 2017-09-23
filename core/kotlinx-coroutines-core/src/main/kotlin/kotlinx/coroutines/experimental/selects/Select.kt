@@ -319,7 +319,7 @@ internal class SelectBuilderImpl<in R>(
         // Note: may be invoked multiple times, but only the first trySelect succeeds anyway
         override fun invoke(reason: Throwable?) {
             if (trySelect(null))
-                resumeSelectCancellableWithException(job.getCompletionException())
+                resumeSelectCancellableWithException(job.getCancellationException())
         }
         override fun toString(): String = "SelectOnCancellation[${this@SelectBuilderImpl}]"
     }

@@ -111,7 +111,7 @@ private class RxObservableCoroutine<T>(
         // check if already closed for send
         if (!isActive) {
             doLockedSignalCompleted()
-            throw getCompletionException()
+            throw getCancellationException()
         }
         // notify subscriber
         try {
@@ -123,7 +123,7 @@ private class RxObservableCoroutine<T>(
             } finally {
                 doLockedSignalCompleted()
             }
-            throw getCompletionException()
+            throw getCancellationException()
         }
         /*
            There is no sense to check for `isActive` before doing `unlock`, because cancellation/completion might

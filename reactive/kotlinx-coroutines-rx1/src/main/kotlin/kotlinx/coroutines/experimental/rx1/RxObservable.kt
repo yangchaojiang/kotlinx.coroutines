@@ -112,7 +112,7 @@ private class RxObservableCoroutine<in T>(
         // check if already closed for send
         if (!isActive) {
             doLockedSignalCompleted()
-            throw getCompletionException()
+            throw getCancellationException()
         }
         // notify subscriber
         try {
@@ -124,7 +124,7 @@ private class RxObservableCoroutine<in T>(
             } finally {
                 doLockedSignalCompleted()
             }
-            throw getCompletionException()
+            throw getCancellationException()
         }
         // now update nRequested
         while (true) { // lock-free loop on nRequested

@@ -125,20 +125,20 @@ open class TestBase {
         var exCount = 0
         var ex: Throwable? = null
         try {
-            runBlocking(block = block, context = CoroutineExceptionHandler { context, exception ->
-                if (exception is CancellationException) return@CoroutineExceptionHandler // are ignored
+            runBlocking(block = block, context = CoroutineExceptionHandler { context, e ->
+                if (e is CancellationException) return@CoroutineExceptionHandler // are ignored
                 exCount++
                 if (exCount > unhandled.size)
-                    error("Too many unhandled exceptions $exCount, expected ${unhandled.size}, got exception: $exception")
-                if (!unhandled[exCount - 1](exception))
-                    error("Unhandled exception of unexpected type: $exception")
-                context[Job]?.cancel(exception)
+                    error("Too many unhandled exceptions $exCount, expected ${unhandled.size}, got: $e", e)
+                if (!unhandled[exCount - 1](e))
+                    error("Unhandled exception was unexpected: $e", e)
+                context[Job]?.cancel(e)
             })
         } catch (e: Throwable) {
             ex = e
             if (expected != null) {
                 if (!expected(e))
-                    error("Exception of unexpected type: $e", e)
+                    error("Unexpected exception: $e", e)
             } else
                 throw e
         } finally {

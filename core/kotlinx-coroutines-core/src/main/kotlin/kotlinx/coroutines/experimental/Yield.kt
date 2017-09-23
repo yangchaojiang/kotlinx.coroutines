@@ -39,5 +39,5 @@ suspend fun yield(): Unit = suspendCoroutineOrReturn sc@ { cont ->
 
 internal fun CoroutineContext.checkCompletion() {
     val job = get(Job)
-    if (job != null && !job.isActive) throw job.getCompletionException()
+    if (job != null && !job.isActive) throw job.getCancellationException()
 }

@@ -108,9 +108,19 @@ public interface Deferred<out T> : Job {
      * [completed exceptionally][isCompletedExceptionally].
      *
      * This function is designed to be used from [invokeOnCompletion] handlers, when there is an absolute certainty that
-     * the value is already complete.
+     * the value is already complete. See also [getCompletionExceptionOrNull].
      */
     public fun getCompleted(): T
+
+    /**
+     * Returns *completion exception* result if this deferred [completed exceptionally][isCompletedExceptionally],
+     * `null` if it is completed normally, or throws [IllegalStateException] if this deferred value has not
+     * [completed][isCompleted] yet.
+     *
+     * This function is designed to be used from [invokeOnCompletion] handlers, when there is an absolute certainty that
+     * the value is already complete. See also [getCompleted].
+     */
+    public fun getCompletionExceptionOrNull(): Throwable?
 
     /**
      * @suppress **Deprecated**: Use `isActive`.
