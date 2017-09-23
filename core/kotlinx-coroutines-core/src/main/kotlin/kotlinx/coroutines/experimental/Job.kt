@@ -346,25 +346,21 @@ public class CompletionHandlerException(message: String, cause: Throwable) : Run
 public typealias CancellationException = java.util.concurrent.CancellationException
 
 /**
- * Creates a cancellation exception with a given [message] and [cause].
- */
-public fun CancellationException(message: String, cause: Throwable) : CancellationException =
-    CancellationException(message).apply { initCause(cause) }
-
-/**
  * Thrown by cancellable suspending functions if the [Job] of the coroutine is cancelled without cause
  * (see [Job.getCompletionException]).
  */
 public class JobCancellationException(
     message: String,
-    cause: Throwable? = null,
     /**
      * The job that was cancelled.
      */
     public val job: Job
 ) : CancellationException(message) {
-    init { if (cause != null) initCause(cause) }
     override fun toString(): String = "${super.toString()}; job=$job"
+    override fun equals(other: Any?): Boolean =
+        other === this || other is JobCancellationException && other.message == message && other.job == job
+    override fun hashCode(): Int =
+        message!!.hashCode() * 31 + job.hashCode()
 }
 
 /**
