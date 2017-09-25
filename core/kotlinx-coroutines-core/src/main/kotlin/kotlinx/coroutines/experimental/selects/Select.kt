@@ -309,7 +309,7 @@ internal class SelectBuilderImpl<in R>(
 
     private fun initCancellability() {
         val parent = context[Job] ?: return
-        val newRegistration = parent.invokeOnCompletion(SelectOnCancellation(parent), onCancelling = true)
+        val newRegistration = parent.invokeOnCompletion(onCancelling = true, handler = SelectOnCancellation(parent))
         parentHandle = newRegistration
         // now check our state _after_ registering
         if (isSelected) newRegistration.dispose()

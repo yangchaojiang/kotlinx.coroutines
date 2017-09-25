@@ -56,10 +56,15 @@ object NonCancellable : AbstractCoroutineContextElement(Job), Job {
     override fun getCancellationException(): CancellationException = throw IllegalStateException("This job is always active")
 
     /** Always returns [NonDisposableHandle]. */
+    @Suppress("OverridingDeprecatedMember")
     override fun invokeOnCompletion(handler: CompletionHandler): DisposableHandle = NonDisposableHandle
 
     /** Always returns [NonDisposableHandle]. */
+    @Suppress("OverridingDeprecatedMember")
     override fun invokeOnCompletion(handler: CompletionHandler, onCancelling: Boolean): DisposableHandle = NonDisposableHandle
+
+    /** Always returns [NonDisposableHandle]. */
+    override fun invokeOnCompletion(onCancelling: Boolean, handler: CompletionHandler): DisposableHandle = NonDisposableHandle
 
     /** Always returns `false`. */
     override fun cancel(cause: Throwable?): Boolean = false

@@ -162,7 +162,7 @@ public inline suspend fun <T> suspendAtomicCancellableCoroutine(
  * @suppress **This is unstable API and it is subject to change.**
  */
 public fun CancellableContinuation<*>.removeOnCancel(node: LockFreeLinkedListNode): DisposableHandle =
-    invokeOnCompletion(RemoveOnCancel(this, node))
+    invokeOnCompletion(handler = RemoveOnCancel(this, node))
 
 // --------------- implementation details ---------------
 
