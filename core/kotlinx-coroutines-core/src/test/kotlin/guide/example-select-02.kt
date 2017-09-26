@@ -17,11 +17,9 @@
 // This file was automatically generated from coroutines-guide.md by Knit tool. Do not edit.
 package guide.select.example02
 
-import kotlinx.coroutines.experimental.cancelAndJoin
-import kotlinx.coroutines.experimental.channels.ReceiveChannel
-import kotlinx.coroutines.experimental.channels.produce
-import kotlinx.coroutines.experimental.runBlocking
-import kotlinx.coroutines.experimental.selects.select
+import kotlinx.coroutines.experimental.*
+import kotlinx.coroutines.experimental.channels.*
+import kotlinx.coroutines.experimental.selects.*
 
 suspend fun selectAorB(a: ReceiveChannel<String>, b: ReceiveChannel<String>): String =
     select<String> {
@@ -50,6 +48,5 @@ fun main(args: Array<String>) = runBlocking<Unit> {
     repeat(8) { // print first eight results
         println(selectAorB(a, b))
     }
-    a.cancelAndJoin()
-    b.cancelAndJoin()
+    coroutineContext.cancelChildren()    
 }

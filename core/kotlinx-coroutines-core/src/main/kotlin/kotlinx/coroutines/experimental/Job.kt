@@ -213,10 +213,14 @@ public interface Job : CoroutineContext.Element {
      *
      * Note, that the job becomes complete only when all its [children][attachChild] are complete.
      *
-     * This suspending function is cancellable and always checks for the cancellation of invoking coroutine's Job.
+     * This suspending function is cancellable and **always** checks for the cancellation of invoking coroutine's Job.
      * If the [Job] of the invoking coroutine is cancelled or completed when this
      * suspending function is invoked or while it is suspended, this function
      * throws [CancellationException].
+     *
+     * In particular, it means that a parent coroutine invoking `join` on a child coroutine that was started using
+     * `launch(coroutineContext) { ... }` builder throws [CancellationException] if the child
+     * had crashed, unless a non-standard [CoroutineExceptionHandler] if installed in the context.
      *
      * This function can be used in [select] invocation with [onJoin] clause.
      * Use [isCompleted] to check for completion of this job without waiting.
@@ -417,8 +421,14 @@ public fun Job.cancelFutureOnCompletion(future: Future<*>): DisposableHandle =
 /**
  * Cancels the job and suspends invoking coroutine until the cancelled job is complete.
  *
- * This suspending function is cancellable. If the [Job] of the invoking coroutine is cancelled or completed while this
- * suspending function is suspended, this function immediately resumes with [CancellationException].
+ * This suspending function is cancellable and **always** checks for the cancellation of invoking coroutine's Job.
+ * If the [Job] of the invoking coroutine is cancelled or completed when this
+ * suspending function is invoked or while it is suspended, this function
+ * throws [CancellationException].
+ *
+ * In particular, it means that a parent coroutine invoking `cancelAndJoin` on a child coroutine that was started using
+ * `launch(coroutineContext) { ... }` builder throws [CancellationException] if the child
+ * had crashed, unless a non-standard [CoroutineExceptionHandler] if installed in the context.
  *
  * This is a shortcut for the invocation of [cancel][Job.cancel] followed by [join][Job.join].
  */

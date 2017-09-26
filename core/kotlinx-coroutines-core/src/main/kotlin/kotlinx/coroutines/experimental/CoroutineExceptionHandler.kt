@@ -22,6 +22,7 @@ import kotlin.coroutines.experimental.CoroutineContext
 
 /**
  * Helper function for coroutine builder implementations to handle uncaught exception in coroutines.
+ *
  * It tries to handle uncaught exception in the following way:
  * * If there is [CoroutineExceptionHandler] in the context, then it is used.
  * * Otherwise, if exception is [CancellationException] then it is ignored
@@ -46,6 +47,14 @@ fun handleCoroutineException(context: CoroutineContext, exception: Throwable) {
 
 /**
  * An optional element on the coroutine context to handle uncaught exceptions.
+ *
+ * By default, when no handler is installed, uncaught exception are handled in the following way:
+ * * If exception is [CancellationException] then it is ignored
+ *   (because that is the supposed mechanism to cancel the running coroutine)
+ * * Otherwise:
+ *     * if there is a [Job] in the context, then [Job.cancel] is invoked;
+ *     * and current thread's [Thread.uncaughtExceptionHandler] is invoked.
+ *
  * See [handleCoroutineException].
  */
 public interface CoroutineExceptionHandler : CoroutineContext.Element {
