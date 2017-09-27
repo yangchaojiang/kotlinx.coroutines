@@ -89,97 +89,99 @@ subprojects {
 }
 
 subprojects {
-    afterEvaluate { project ->
 
-        sourceSets {
-            custom {
+    if (skipClassesTransformation(project.name)) return
 
+    def CLASSES_AFTER_ATOMICFU_TRANSFORM = file("$buildDir/classes-atomicfu/main")
+    def MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/main")
+    def TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/test")
+    def CLEAR_CLASSES_MAIN = sourceSets.main.output.classesDirs
+    def CLEAR_CLASSES_TEST = sourceSets.test.output.classesDirs
+
+    atomicFU {
+        inputFiles = CLEAR_CLASSES_MAIN
+        outputDir = CLASSES_AFTER_ATOMICFU_TRANSFORM
+        classPath = sourceSets.main.runtimeClasspath
+    }
+    atomicFU.dependsOn compileKotlin
+    testClasses.dependsOn atomicFU
+
+    task debuggerTransformMain(type: JavaExec) {
+        classpath = sourceSets.test.compileClasspath
+        main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
+        args CLEAR_CLASSES_MAIN.files.join(";"), MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM
+    }
+
+    task debuggerTransformTest(type: JavaExec) {
+        classpath = sourceSets.test.compileClasspath
+        main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
+        args CLEAR_CLASSES_TEST.files.join(";"), TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
+    }
+
+    debuggerTransformMain.dependsOn classes
+    debuggerTransformTest.dependsOn testClasses
+
+    task generateDebuggableJar(type: Jar) {
+        classifier = 'debuggable'
+        dependsOn debuggerTransformMain
+        from files(MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM, sourceSets.main.output.resourcesDir)
+    }
+
+    jar {
+        from files(CLASSES_AFTER_ATOMICFU_TRANSFORM, sourceSets.main.output.resourcesDir)
+    }
+
+    configurations {
+        debuggable {
+            transitive = true
+        }
+    }
+
+    artifacts {
+        debuggable generateDebuggableJar
+    }
+
+    test {
+        classpath = files(configurations.testRuntime, CLASSES_AFTER_ATOMICFU_TRANSFORM, CLEAR_CLASSES_TEST, sourceSets.main.output.resourcesDir)
+    }
+
+
+    task testWithDebugger(type: Test) {
+        dependsOn generateDebuggableJar
+
+        dependsOn configurations.debuggable
+        doFirst {
+            def externalDependencies = configurations.testRuntime.allDependencies.matching {
+                !(it instanceof ProjectDependency)
             }
-        }
 
-        task foo {
-            doLast {
-                //println("compileKotlin.output =${compileKotlin.destinationDir}")
-                println("customSourseSet = ${sourceSets.custom.output.getClass()}")
-                println("sourceSets.custom.output.getClassesDirs()")
-                sourceSets.custom.output.getClassesDirs().each {println(it)}
-                println("------------")
-            }
-        }
+            def externalFiles = configurations.testRuntime.files(*externalDependencies.toArray())
 
-        if (skipClassesTransformation(project.name)) return
+            def projectCompileDeps = configurations.compile.allDependencies.matching { it instanceof ProjectDependency }
+            def testCompileDeps = configurations.testCompile.allDependencies
 
-        ext.CLASSES_AFTER_ATOMICFU_TRANSFORM = file("$buildDir/classes-atomicfu/main")
-        ext.MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/main")
-        ext.TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/test")
-        ext.CLEAR_CLASSES_MAIN = compileKotlin.destinationDir
-        ext.CLEAR_CLASSES_TEST = compileTestKotlin.destinationDir
+            def testCompileFiles = configurations.testCompile.files(*testCompileDeps.toArray())
+            def projectCompileFiles = configurations.compile.files(*projectCompileDeps.toArray())
+            def testCompileOnlyFiles = testCompileFiles - projectCompileFiles
 
-        atomicFU {
-            inputDir = CLEAR_CLASSES_MAIN
-            outputDir = CLASSES_AFTER_ATOMICFU_TRANSFORM
-            classPath = sourceSets.main.runtimeClasspath.asPath.split(":")//FIXME?
-        }
-        atomicFU.dependsOn compileKotlin
-        testClasses.dependsOn atomicFU
-
-        task debuggerTransformMain(type: JavaExec) {
-            classpath = sourceSets.test.compileClasspath
-            main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
-            args CLEAR_CLASSES_MAIN, MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM
-        }
-
-        task debuggerTransformTest(type: JavaExec) {
-            classpath = sourceSets.test.compileClasspath
-            main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
-            args CLEAR_CLASSES_TEST, TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
-        }
-
-        debuggerTransformMain.dependsOn compileKotlin
-        debuggerTransformTest.dependsOn compileTestKotlin
-
-        sourceSets {
-            transformed {
-                println("sourceSets.transformed configureation for ${project.name}: CLASSES_AFTER_ATOMICFU_TRANSFORM = $CLASSES_AFTER_ATOMICFU_TRANSFORM")
-                compileClasspath = sourceSets.main.compileClasspath
-                runtimeClasspath = sourceSets.main.runtimeClasspath
-                output.classesDir = CLASSES_AFTER_ATOMICFU_TRANSFORM
-                output.resourcesDir = sourceSets.main.output.resourcesDir
-            }
-        }
-
-        jar {
-            from sourceSets.transformed.output
-        }
-
-        ext.replaceMainClassPathWithTransformed = { filesList, transformed ->
-            def index = filesList.findIndexOf { it == sourceSets.main.output.classesDir }
-            def list = filesList.toList()
-            list.set(index, transformed)
-            return files(list)
-        }
-
-        test {
-            classpath = replaceMainClassPathWithTransformed(classpath, CLASSES_AFTER_ATOMICFU_TRANSFORM)
-        }
-
-        task testWithDebugger(type: Test) {
-            classpath = replaceMainClassPathWithTransformed(classpath, "$buildDir/classes-debuggable/main")
-            testClassesDirs = files(file(TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM))
+            classpath =
+                    files(testCompileOnlyFiles, externalFiles, configurations.debuggable,
+                            generateDebuggableJar, TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM)
 
             testLogging {
                 events "passed", "skipped", "failed"
             }
 
             //include "**/RunTest**"
-            filter {
-                includeTestsMatching "kotlinx.coroutines.experimental.RunTest.testSameContextWithSuspend"
-            }
+//                filter {
+//                    includeTestsMatching "kotlinx.coroutines.experimental.RunTest.testSameContextWithSuspend"
+//                }
             systemProperty "debug-agent-enabled", true
             systemProperty "dumps-directory", TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
         }
-        testWithDebugger.dependsOn(debuggerTransformMain, debuggerTransformTest)
     }
+    testWithDebugger.dependsOn(debuggerTransformMain, debuggerTransformTest)
+
 }
 
 configure(subprojects.findAll { it.name.startsWith('kotlinx-coroutines-debug') }) {
@@ -190,10 +192,13 @@ configure(subprojects.findAll { !skipClassesTransformation(it.name) && it.name !
     // 'kotlinx-coroutines-android' project name is lexicographically smaller than 'kotlinx-coroutines-core's,
     // therefore its subprojects {...} clojure evaluated before 'kotlinx-coroutines-core's and
     // can't find sourceSets property of 'kotlinx-coroutines-core'
+
     dependencies {
         compile project(':kotlinx-coroutines-core')
         //the only way IDEA can resolve test classes
         testCompile project(':kotlinx-coroutines-core').sourceSets.test.output
+        testCompile project(':kotlinx-coroutines-debug-test')
+        debuggable project(path: ':kotlinx-coroutines-core', configuration: 'debuggable')
     }
 
     dokka.dependsOn project(':kotlinx-coroutines-core').dokka

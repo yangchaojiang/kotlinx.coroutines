@@ -1,6 +1,6 @@
 dependencies {
     compile 'junit:junit:4.12'
     compile project(':kotlinx-coroutines-debug-manager')
-    compile project(':kotlinx-coroutines-core')
+//    compile project(':kotlinx-coroutines-core')
     testCompile files("${System.properties.'java.home'}/../lib/tools.jar")
 }

@@ -108,6 +108,7 @@ class CoroutinesDebugTransformer : ClassFileTransformer {
 class FilesTransformer(private val inputDir: File, private val outputDir: File = inputDir) {
     fun transform() {
         exceptions = AppendOnlyThreadSafeList()
+        outputDir.mkdirs()
         info { "Transforming from $inputDir to $outputDir" }
         inputDir.walk().filter { it.isFile }.forEach { file ->
             if (file.isClassFile()) info { "Transforming $file" }
@@ -135,9 +136,28 @@ private fun File.isClassFile() = toString().endsWith(".class")
 fun main(args: Array<String>) {
     if (args.size != 1 && args.size != 2) {
         println("Usage: CoroutineDebugTransformerKt <inputDir> (<outputDir>)")
+        println("Usage: CoroutineDebugTransformerKt <inputDir;inputDir2> <outputDir>")
         return
     }
-    val t = if (args.size == 1) FilesTransformer(File(args[0])) else FilesTransformer(File(args[0]), File(args[1]))
     Logger.config = LoggerConfig(LogLevel.ERROR)
-    t.transform()
+    val outputDir = File(args[1])
+    val dirs = args[0].split(";").map(::File)
+
+    if (dirs.size > 1 && args.size == 1) {
+        println("Usage: CoroutineDebugTransformerKt <inputDir;inputDir2> <outputDir>")
+        return
+    }
+
+    if (dirs.size == 1) {
+        val t = if (args.size == 1) {
+            FilesTransformer(dirs.single())
+        } else {
+            FilesTransformer(dirs.single(), outputDir)
+        }
+        t.transform()
+    } else {
+        dirs.forEach {
+            FilesTransformer(it, outputDir).transform()
+        }
+    }
 }
