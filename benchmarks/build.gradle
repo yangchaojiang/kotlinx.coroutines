@@ -15,5 +15,3 @@ dependencies {
 jmh.jmhVersion = '1.19'
 
 jmhJar.archiveName = 'benchmarks.jar'
-
-build.dependsOn jmhJar

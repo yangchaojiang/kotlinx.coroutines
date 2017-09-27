@@ -18,8 +18,14 @@ package kotlinx.coroutines.experimental
 
 import guide.test.checkTestThreads
 import guide.test.currentThreads
+import kotlinx.coroutines.debug.manager.*
+import kotlinx.coroutines.debug.test.DebuggerTestAssertions
 import org.junit.After
 import org.junit.Before
+import org.junit.BeforeClass
+import sun.rmi.runtime.Log
+import java.io.File
+import java.net.URLClassLoader
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -101,6 +107,31 @@ open class TestBase {
 
     private lateinit var threadsBefore: Set<Thread>
     private val SHUTDOWN_TIMEOUT = 10_000L // 10s at most to wait
+
+    companion object {
+        @JvmStatic
+        @BeforeClass
+        fun beforeClass() {
+            println("all classpath:")
+            val classPaths = (Thread.currentThread().contextClassLoader as URLClassLoader).urLs
+            classPaths.forEach {
+                println(it)
+            }
+            println("------------------")
+            if (System.getProperty("debug-agent-enabled").toBoolean()) {
+                DebuggerTestAssertions.enabled = true
+                Logger.config = LoggerConfig(LogLevel.DEBUG)
+                val dumpsDir = File(System.getProperty("dumps-directory"))
+                require(dumpsDir.exists()) //TODO: reasonable error message
+                File(dumpsDir, ALL_SUSPEND_CALLS_DUMP_FILE_NAME).readAll(SuspendCall).forEach {
+                    allSuspendCalls.appendWithIndex(it)
+                }
+                File(dumpsDir, KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME).readAll(MethodId).forEach {
+                    knownDoResumeFunctions.appendWithIndex(it)
+                }
+            }
+        }
+    }
 
     @Before
     fun before() {

@@ -44,9 +44,7 @@ subprojects {
         jdkVersion = 8
     }
 
-    test {
-        testLogging.showStandardStreams = true
-    }
+    test.testLogging.showStandardStreams = true
 
     task sourcesJar(type: Jar, dependsOn: classes) {
         classifier = 'sources'
@@ -67,16 +65,129 @@ subprojects {
 
     dependencies {
         compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
-        compileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
 
         testCompile "junit:junit:$junit_version"
-        testCompileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
-        testRuntime "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
     }
 }
 
-configure(subprojects.findAll { !['kotlinx-coroutines-core', 'benchmarks', 'knit', 'site'].contains(it.name) }) {
-    // 'kotlinx-coroutines-android' projects name is lexicographically smaller than 'kotlinx-coroutines-core's,
+ext.skipClassesTransformation = { projectName ->
+    return ['benchmarks', 'knit', 'site'].contains(projectName) || projectName.startsWith('kotlinx-coroutines-debug')
+}
+
+subprojects {
+    if (!skipClassesTransformation(it.name)) {
+        println("configure transformer dependencies for $name")
+        dependencies {
+            compileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
+
+            testCompileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
+            testRuntime "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
+            testCompile project(':kotlinx-coroutines-debug-transformer')
+            testCompile project(':kotlinx-coroutines-debug-manager')
+        }
+    }
+}
+
+subprojects {
+    afterEvaluate { project ->
+
+        sourceSets {
+            custom {
+
+            }
+        }
+
+        task foo {
+            doLast {
+                //println("compileKotlin.output =${compileKotlin.destinationDir}")
+                println("customSourseSet = ${sourceSets.custom.output.getClass()}")
+                println("sourceSets.custom.output.getClassesDirs()")
+                sourceSets.custom.output.getClassesDirs().each {println(it)}
+                println("------------")
+            }
+        }
+
+        if (skipClassesTransformation(project.name)) return
+
+        ext.CLASSES_AFTER_ATOMICFU_TRANSFORM = file("$buildDir/classes-atomicfu/main")
+        ext.MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/main")
+        ext.TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/test")
+        ext.CLEAR_CLASSES_MAIN = compileKotlin.destinationDir
+        ext.CLEAR_CLASSES_TEST = compileTestKotlin.destinationDir
+
+        atomicFU {
+            inputDir = CLEAR_CLASSES_MAIN
+            outputDir = CLASSES_AFTER_ATOMICFU_TRANSFORM
+            classPath = sourceSets.main.runtimeClasspath.asPath.split(":")//FIXME?
+        }
+        atomicFU.dependsOn compileKotlin
+        testClasses.dependsOn atomicFU
+
+        task debuggerTransformMain(type: JavaExec) {
+            classpath = sourceSets.test.compileClasspath
+            main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
+            args CLEAR_CLASSES_MAIN, MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM
+        }
+
+        task debuggerTransformTest(type: JavaExec) {
+            classpath = sourceSets.test.compileClasspath
+            main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
+            args CLEAR_CLASSES_TEST, TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
+        }
+
+        debuggerTransformMain.dependsOn compileKotlin
+        debuggerTransformTest.dependsOn compileTestKotlin
+
+        sourceSets {
+            transformed {
+                println("sourceSets.transformed configureation for ${project.name}: CLASSES_AFTER_ATOMICFU_TRANSFORM = $CLASSES_AFTER_ATOMICFU_TRANSFORM")
+                compileClasspath = sourceSets.main.compileClasspath
+                runtimeClasspath = sourceSets.main.runtimeClasspath
+                output.classesDir = CLASSES_AFTER_ATOMICFU_TRANSFORM
+                output.resourcesDir = sourceSets.main.output.resourcesDir
+            }
+        }
+
+        jar {
+            from sourceSets.transformed.output
+        }
+
+        ext.replaceMainClassPathWithTransformed = { filesList, transformed ->
+            def index = filesList.findIndexOf { it == sourceSets.main.output.classesDir }
+            def list = filesList.toList()
+            list.set(index, transformed)
+            return files(list)
+        }
+
+        test {
+            classpath = replaceMainClassPathWithTransformed(classpath, CLASSES_AFTER_ATOMICFU_TRANSFORM)
+        }
+
+        task testWithDebugger(type: Test) {
+            classpath = replaceMainClassPathWithTransformed(classpath, "$buildDir/classes-debuggable/main")
+            testClassesDirs = files(file(TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM))
+
+            testLogging {
+                events "passed", "skipped", "failed"
+            }
+
+            //include "**/RunTest**"
+            filter {
+                includeTestsMatching "kotlinx.coroutines.experimental.RunTest.testSameContextWithSuspend"
+            }
+            systemProperty "debug-agent-enabled", true
+            systemProperty "dumps-directory", TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
+        }
+        testWithDebugger.dependsOn(debuggerTransformMain, debuggerTransformTest)
+    }
+}
+
+configure(subprojects.findAll { it.name.startsWith('kotlinx-coroutines-debug') }) {
+    test.exclude "**/*"
+}
+
+configure(subprojects.findAll { !skipClassesTransformation(it.name) && it.name != 'kotlinx-coroutines-core' }) {
+    // 'kotlinx-coroutines-android' project name is lexicographically smaller than 'kotlinx-coroutines-core's,
     // therefore its subprojects {...} clojure evaluated before 'kotlinx-coroutines-core's and
     // can't find sourceSets property of 'kotlinx-coroutines-core'
     dependencies {
@@ -87,10 +198,8 @@ configure(subprojects.findAll { !['kotlinx-coroutines-core', 'benchmarks', 'knit
 
     dokka.dependsOn project(':kotlinx-coroutines-core').dokka
 
-    dokka {
-        externalDocumentationLink {
-            url = new URL(dokka.core_docs_url)
-            packageListUrl = new URL("file://${dokka.core_docs_file}")
-        }
+    dokka.externalDocumentationLink {
+        url = new URL(dokka.core_docs_url)
+        packageListUrl = new URL("file://${dokka.core_docs_file}")
     }
 }

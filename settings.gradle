@@ -20,6 +20,11 @@ include 'benchmarks'
 include 'knit'
 include 'site'
 
+include 'kotlinx-coroutines-debug-agent'
+include 'kotlinx-coroutines-debug-manager'
+include 'kotlinx-coroutines-debug-test'
+include 'kotlinx-coroutines-debug-transformer'
+
 project(':kotlinx-coroutines-core').projectDir = file('core/kotlinx-coroutines-core')
 project(':kotlinx-coroutines-io').projectDir = file('core/kotlinx-coroutines-io')
 
@@ -34,3 +39,7 @@ project(':kotlinx-coroutines-rx2').projectDir = file('reactive/kotlinx-coroutine
 project(':kotlinx-coroutines-android').projectDir = file('ui/kotlinx-coroutines-android')
 project(':kotlinx-coroutines-javafx').projectDir = file('ui/kotlinx-coroutines-javafx')
 project(':kotlinx-coroutines-swing').projectDir = file('ui/kotlinx-coroutines-swing')
+project(':kotlinx-coroutines-debug-agent').projectDir = file('debugger/kotlinx-coroutines-debug-agent')
+project(':kotlinx-coroutines-debug-manager').projectDir = file('debugger/kotlinx-coroutines-debug-manager')
+project(':kotlinx-coroutines-debug-test').projectDir = file('debugger/kotlinx-coroutines-debug-test')
+project(':kotlinx-coroutines-debug-transformer').projectDir = file('debugger/kotlinx-coroutines-debug-transformer')
