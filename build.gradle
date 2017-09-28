@@ -75,7 +75,7 @@ ext.skipClassesTransformation = { projectName ->
 }
 
 subprojects {
-    if (!skipClassesTransformation(it.name)) {
+    if (!skipClassesTransformation(it.name)) { //FIXME
         println("configure transformer dependencies for $name")
         dependencies {
             compileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
@@ -105,11 +105,12 @@ subprojects {
     }
     atomicFU.dependsOn compileKotlin
     testClasses.dependsOn atomicFU
+    jar.dependsOn atomicFU //FIXME
 
     task debuggerTransformMain(type: JavaExec) {
         classpath = sourceSets.test.compileClasspath
         main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
-        args CLEAR_CLASSES_MAIN.files.join(";"), MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM
+        args CLASSES_AFTER_ATOMICFU_TRANSFORM, MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM
     }
 
     task debuggerTransformTest(type: JavaExec) {
@@ -142,7 +143,8 @@ subprojects {
     }
 
     test {
-        classpath = files(configurations.testRuntime, CLASSES_AFTER_ATOMICFU_TRANSFORM, CLEAR_CLASSES_TEST, sourceSets.main.output.resourcesDir)
+        classpath = files(configurations.testRuntime, CLASSES_AFTER_ATOMICFU_TRANSFORM, CLEAR_CLASSES_TEST,
+                sourceSets.main.output.resourcesDir)
     }
 
 
@@ -164,9 +166,8 @@ subprojects {
             def projectCompileFiles = configurations.compile.files(*projectCompileDeps.toArray())
             def testCompileOnlyFiles = testCompileFiles - projectCompileFiles
 
-            classpath =
-                    files(testCompileOnlyFiles, externalFiles, configurations.debuggable,
-                            generateDebuggableJar, TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM)
+            classpath = files(testCompileOnlyFiles, externalFiles, configurations.debuggable, generateDebuggableJar,
+                    TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM)
 
             testLogging {
                 events "passed", "skipped", "failed"

@@ -23,8 +23,6 @@ import kotlinx.coroutines.debug.test.DebuggerTestAssertions
 import org.junit.After
 import org.junit.Before
 import org.junit.BeforeClass
-import sun.rmi.runtime.Log
-import java.io.File
 import java.net.URLClassLoader
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -112,23 +110,27 @@ open class TestBase {
         @JvmStatic
         @BeforeClass
         fun beforeClass() {
+            val classLoader = Thread.currentThread().contextClassLoader
             println("all classpath:")
-            val classPaths = (Thread.currentThread().contextClassLoader as URLClassLoader).urLs
-            classPaths.forEach {
-                println(it)
-            }
+            println((classLoader as URLClassLoader).urLs.joinToString("\n"))
             println("------------------")
             if (System.getProperty("debug-agent-enabled").toBoolean()) {
                 DebuggerTestAssertions.enabled = true
                 Logger.config = LoggerConfig(LogLevel.DEBUG)
-                val dumpsDir = File(System.getProperty("dumps-directory"))
-                require(dumpsDir.exists()) //TODO: reasonable error message
-                File(dumpsDir, ALL_SUSPEND_CALLS_DUMP_FILE_NAME).readAll(SuspendCall).forEach {
-                    allSuspendCalls.appendWithIndex(it)
-                }
-                File(dumpsDir, KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME).readAll(MethodId).forEach {
-                    knownDoResumeFunctions.appendWithIndex(it)
-                }
+                val suspendCallsIndex = classLoader.getResources(ALL_SUSPEND_CALLS_DUMP_FILE_NAME).toList()
+                println("suspend calls indexes: ${suspendCallsIndex.toList()}")
+                allSuspendCallsMap.putAll(
+                        suspendCallsIndex.flatMap {
+                            it.openStream().bufferedReader().readLines().map { it.readKV(SuspendCall) }
+                        })
+                val doResumeFunctionsIndex = classLoader.getResources(KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME).toList()
+                println("doResume functions indexes: ${doResumeFunctionsIndex.toList()}")
+                knownDoResumeFunctionsMap.putAll(
+                        doResumeFunctionsIndex.flatMap {
+                            it.openStream().bufferedReader().readLines().map { it.readKV(MethodId) }
+                        })
+                println("suspend calls size: ${allSuspendCallsMap.size}")
+                println("do resume functions size: ${knownDoResumeFunctionsMap.size}")
             }
         }
     }

@@ -7,10 +7,17 @@ interface StupidSerializer<T> {
     fun write(obj: T): String
 }
 
-fun <T> File.readAll(reader: StupidSerializer<T>) = readLines().map { reader.read(it.trim(' ', '\n')) }
+private val KV_SEPARATOR = "\t\t"
 
-fun <T> File.writeAll(writer: StupidSerializer<T>, objects: List<T>)
-        = writeText(objects.joinToString("\n") { writer.write(it) })
+fun <T> String.readKV(reader: StupidSerializer<T>): Pair<String, T> {
+    val (key, value) = trim(' ', '\n').split(KV_SEPARATOR)
+    return key to reader.read(value)
+}
+
+fun <T> File.readAll(reader: StupidSerializer<T>) = readLines().map { it.readKV(reader) }
+
+fun <T> File.writeAll(writer: StupidSerializer<T>, keyValues: List<Pair<String, T>>)
+        = writeText(keyValues.joinToString("\n") { (k, v) -> "$k$KV_SEPARATOR${writer.write(v)}" })
 
 data class MethodId(val name: String, val className: String, val desc: String) {
     init {

@@ -45,8 +45,8 @@ private fun MethodNode.addSuspendCallHandlers(
     suspendCallsInThisMethod.forEach {
         val position = CallPosition(classNode.sourceFile, lines[it] ?: -1)
         val call = SuspendCall(it.buildMethodId(), this.buildMethodId(classNode), position)
-        val index = allSuspendCalls.appendWithIndex(call)
-        instructions.insert(it, generateAfterSuspendCall(continuationVarIndex, index))
+        val key = putIntoAllSuspendCallsMap(classNode.name, call)
+        instructions.insert(it, generateAfterSuspendCall(continuationVarIndex, key))
     }
 }
 
@@ -72,8 +72,8 @@ private fun MethodNode.transformMethod(classNode: ClassNode) {
                 "cont: $continuation, isAnonymous: $isAnonymous"
     }
     if (isDoResume) {
-        val index = knownDoResumeFunctions.appendWithIndex(buildMethodId(classNode))
-        instructions.insert(generateHandleDoResumeCallEnter(continuation, index))
+        val key = putIntoKnownDoResumeFunctionsMap(classNode.name, buildMethodId(classNode))
+        instructions.insert(generateHandleDoResumeCallEnter(continuation, key))
         if (!isAnonymous) return
     }
     val suspendCalls = suspendCallInstructions(classNode)
@@ -131,8 +131,10 @@ class FilesTransformer(private val inputDir: File, private val outputDir: File =
         if (exceptions?.isNotEmpty() == true)
             throw Exception("Encountered errors while transforming", exceptions?.firstOrNull())
         info { "Saving indexes into $outputDir" }
-        File(outputDir, ALL_SUSPEND_CALLS_DUMP_FILE_NAME).writeAll(SuspendCall.Companion, allSuspendCalls)
-        File(outputDir, KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME).writeAll(MethodId.Companion, knownDoResumeFunctions)
+        File(outputDir, ALL_SUSPEND_CALLS_DUMP_FILE_NAME)
+                .writeAll(SuspendCall.Companion, allSuspendCallsMap.toList())
+        File(outputDir, KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME)
+                .writeAll(MethodId.Companion, knownDoResumeFunctionsMap.toList())
     }
 
     private fun File.toOutputFile() = File(outputDir, relativeTo(inputDir).toString())
