@@ -12,6 +12,7 @@ dependencies {
     compile 'io.projectreactor:reactor-core'
     testCompile 'io.projectreactor.addons:reactor-test'
     compile project(':kotlinx-coroutines-reactive')
+    debuggable project(path: ':kotlinx-coroutines-reactive', configuration: 'debuggable')
 }
 dokka {
     externalDocumentationLink {

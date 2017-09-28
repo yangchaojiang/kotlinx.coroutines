@@ -75,21 +75,21 @@ ext.skipClassesTransformation = { projectName ->
 }
 
 subprojects {
-    if (!skipClassesTransformation(it.name)) { //FIXME
-        println("configure transformer dependencies for $name")
+    if (!skipClassesTransformation(it.name)) {
         dependencies {
             compileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
 
             testCompileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
             testRuntime "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
-            testCompile project(':kotlinx-coroutines-debug-transformer')
+
             testCompile project(':kotlinx-coroutines-debug-manager')
+            testCompile project(':kotlinx-coroutines-debug-test')
+            testCompile project(':kotlinx-coroutines-debug-transformer') //for debuggerTransform* tasks
         }
     }
 }
 
 subprojects {
-
     if (skipClassesTransformation(project.name)) return
 
     def CLASSES_AFTER_ATOMICFU_TRANSFORM = file("$buildDir/classes-atomicfu/main")
@@ -99,37 +99,34 @@ subprojects {
     def CLEAR_CLASSES_TEST = sourceSets.test.output.classesDirs
 
     atomicFU {
+        dependsOn classes
         inputFiles = CLEAR_CLASSES_MAIN
         outputDir = CLASSES_AFTER_ATOMICFU_TRANSFORM
         classPath = sourceSets.main.runtimeClasspath
     }
-    atomicFU.dependsOn compileKotlin
-    testClasses.dependsOn atomicFU
-    jar.dependsOn atomicFU //FIXME
 
     task debuggerTransformMain(type: JavaExec) {
+        dependsOn atomicFU
         classpath = sourceSets.test.compileClasspath
         main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
         args CLASSES_AFTER_ATOMICFU_TRANSFORM, MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM
     }
 
     task debuggerTransformTest(type: JavaExec) {
+        dependsOn testClasses
         classpath = sourceSets.test.compileClasspath
         main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
         args CLEAR_CLASSES_TEST.files.join(";"), TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
     }
 
-    debuggerTransformMain.dependsOn classes
-    debuggerTransformTest.dependsOn testClasses
-
-    task generateDebuggableJar(type: Jar) {
-        classifier = 'debuggable'
+    task generateDebuggableSourcesJar(type: Jar) {
         dependsOn debuggerTransformMain
+        classifier = 'debuggable'
         from files(MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM, sourceSets.main.output.resourcesDir)
     }
 
     jar {
-        from files(CLASSES_AFTER_ATOMICFU_TRANSFORM, sourceSets.main.output.resourcesDir)
+        from files(atomicFU.outputs, sourceSets.main.output.resourcesDir)
     }
 
     configurations {
@@ -139,53 +136,44 @@ subprojects {
     }
 
     artifacts {
-        debuggable generateDebuggableJar
+        debuggable generateDebuggableSourcesJar
     }
 
     test {
-        classpath = files(configurations.testRuntime, CLASSES_AFTER_ATOMICFU_TRANSFORM, CLEAR_CLASSES_TEST,
+        classpath = files(configurations.testRuntime, atomicFU.outputs, CLEAR_CLASSES_TEST,
                 sourceSets.main.output.resourcesDir)
     }
 
 
     task testWithDebugger(type: Test) {
-        dependsOn generateDebuggableJar
+        dependsOn configurations.debuggable //execute generateDebuggableSourcesJar for subprojects
+        dependsOn generateDebuggableSourcesJar
+        dependsOn debuggerTransformTest
 
-        dependsOn configurations.debuggable
         doFirst {
-            def externalDependencies = configurations.testRuntime.allDependencies.matching {
-                !(it instanceof ProjectDependency)
-            }
+            //replace all dependencies on other projects classes with its debuggable(instrumented) classes
+            def externalDependencies = configurations.testRuntime.allDependencies
+                    .matching { !(it instanceof ProjectDependency) }
 
             def externalFiles = configurations.testRuntime.files(*externalDependencies.toArray())
 
-            def projectCompileDeps = configurations.compile.allDependencies.matching { it instanceof ProjectDependency }
+            def projectCompileDeps = configurations.compile.allDependencies
+                    .matching { it instanceof ProjectDependency }
             def testCompileDeps = configurations.testCompile.allDependencies
 
             def testCompileFiles = configurations.testCompile.files(*testCompileDeps.toArray())
             def projectCompileFiles = configurations.compile.files(*projectCompileDeps.toArray())
             def testCompileOnlyFiles = testCompileFiles - projectCompileFiles
 
-            classpath = files(testCompileOnlyFiles, externalFiles, configurations.debuggable, generateDebuggableJar,
-                    TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM)
+            classpath = files(testCompileOnlyFiles, externalFiles, configurations.debuggable,
+                    generateDebuggableSourcesJar, TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM)
 
-            testLogging {
-                events "passed", "skipped", "failed"
-            }
-
-            //include "**/RunTest**"
-//                filter {
-//                    includeTestsMatching "kotlinx.coroutines.experimental.RunTest.testSameContextWithSuspend"
-//                }
             systemProperty "debug-agent-enabled", true
-            systemProperty "dumps-directory", TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
         }
     }
-    testWithDebugger.dependsOn(debuggerTransformMain, debuggerTransformTest)
-
 }
 
-configure(subprojects.findAll { it.name.startsWith('kotlinx-coroutines-debug') }) {
+configure(subprojects.findAll { it.name.startsWith('kotlinx-coroutines-debug') }) { //don't run tests for debugger
     test.exclude "**/*"
 }
 
@@ -196,10 +184,12 @@ configure(subprojects.findAll { !skipClassesTransformation(it.name) && it.name !
 
     dependencies {
         compile project(':kotlinx-coroutines-core')
+        debuggable project(path: ':kotlinx-coroutines-core', configuration: 'debuggable')
+
+        //TODO: automatically add dependency for debuggable configuration if compile project specified ?
+
         //the only way IDEA can resolve test classes
         testCompile project(':kotlinx-coroutines-core').sourceSets.test.output
-        testCompile project(':kotlinx-coroutines-debug-test')
-        debuggable project(path: ':kotlinx-coroutines-core', configuration: 'debuggable')
     }
 
     dokka.dependsOn project(':kotlinx-coroutines-core').dokka
