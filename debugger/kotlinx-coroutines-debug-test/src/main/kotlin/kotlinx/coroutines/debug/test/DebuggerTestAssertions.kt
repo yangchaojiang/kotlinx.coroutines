@@ -2,11 +2,48 @@ package kotlinx.coroutines.debug.test
 
 import kotlinx.coroutines.debug.manager.*
 import org.junit.Assert
+import java.net.URLClassLoader
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 typealias CoroutineName = String
 typealias Dump = String
+
+object DebuggerTestUtils {
+    const val PROPERTY_ENABLE_DEBUG = "debug-agent-enabled"
+    const val PROPERTY_LOG_LEVEL = "debug-agent-log-level"
+    fun tryBuildDebuggerIndexes() {
+        val classLoader = Thread.currentThread().contextClassLoader
+        debug { buildString {
+            append("all classpath:")
+            append((classLoader as URLClassLoader).urLs.joinToString("\n"))
+            append("------------------")
+        } }
+        if (System.getProperty(PROPERTY_ENABLE_DEBUG).toBoolean()) {
+            DebuggerTestAssertions.enabled = true
+            val logLevel = try {
+                System.getProperty(PROPERTY_LOG_LEVEL)?.let { LogLevel.valueOf(it.toUpperCase()) }
+            } catch (_: IllegalArgumentException) {
+                null
+            } ?: LogLevel.INFO
+            Logger.config = LoggerConfig(logLevel)
+            val suspendCallsIndex = classLoader.getResources(ALL_SUSPEND_CALLS_DUMP_FILE_NAME).toList()
+            info {"suspend calls indexes: ${suspendCallsIndex.toList()}" }
+            allSuspendCallsMap.putAll(
+                    suspendCallsIndex.flatMap {
+                        it.openStream().bufferedReader().readLines().map { it.readKV(SuspendCall) }
+                    })
+            val doResumeFunctionsIndex = classLoader.getResources(KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME).toList()
+            info {"doResume functions indexes: ${doResumeFunctionsIndex.toList()}"}
+            knownDoResumeFunctionsMap.putAll(
+                    doResumeFunctionsIndex.flatMap {
+                        it.openStream().bufferedReader().readLines().map { it.readKV(MethodId) }
+                    })
+            info { "suspend calls size: ${allSuspendCallsMap.size}" }
+            info { "do resume functions size: ${knownDoResumeFunctionsMap.size}"}
+        }
+    }
+}
 
 object DebuggerTestAssertions {
     var enabled = false
@@ -17,7 +54,6 @@ object DebuggerTestAssertions {
 
     fun before() {
         if (!enabled) return
-        Logger.config = LoggerConfig(LogLevel.DEBUG)
         expectedStates.clear()
         StacksManager.reset()
         exceptions = AppendOnlyThreadSafeList()

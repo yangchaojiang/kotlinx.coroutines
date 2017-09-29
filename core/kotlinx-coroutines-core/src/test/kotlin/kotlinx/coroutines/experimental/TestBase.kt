@@ -18,8 +18,8 @@ package kotlinx.coroutines.experimental
 
 import guide.test.checkTestThreads
 import guide.test.currentThreads
-import kotlinx.coroutines.debug.manager.*
 import kotlinx.coroutines.debug.test.DebuggerTestAssertions
+import kotlinx.coroutines.debug.test.DebuggerTestUtils
 import org.junit.After
 import org.junit.Before
 import org.junit.BeforeClass
@@ -110,33 +110,13 @@ open class TestBase {
         @JvmStatic
         @BeforeClass
         fun beforeClass() {
-            val classLoader = Thread.currentThread().contextClassLoader
-            println("all classpath:")
-            println((classLoader as URLClassLoader).urLs.joinToString("\n"))
-            println("------------------")
-            if (System.getProperty("debug-agent-enabled").toBoolean()) {
-                DebuggerTestAssertions.enabled = true
-                Logger.config = LoggerConfig(LogLevel.DEBUG)
-                val suspendCallsIndex = classLoader.getResources(ALL_SUSPEND_CALLS_DUMP_FILE_NAME).toList()
-                println("suspend calls indexes: ${suspendCallsIndex.toList()}")
-                allSuspendCallsMap.putAll(
-                        suspendCallsIndex.flatMap {
-                            it.openStream().bufferedReader().readLines().map { it.readKV(SuspendCall) }
-                        })
-                val doResumeFunctionsIndex = classLoader.getResources(KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME).toList()
-                println("doResume functions indexes: ${doResumeFunctionsIndex.toList()}")
-                knownDoResumeFunctionsMap.putAll(
-                        doResumeFunctionsIndex.flatMap {
-                            it.openStream().bufferedReader().readLines().map { it.readKV(MethodId) }
-                        })
-                println("suspend calls size: ${allSuspendCallsMap.size}")
-                println("do resume functions size: ${knownDoResumeFunctionsMap.size}")
-            }
+            DebuggerTestUtils.tryBuildDebuggerIndexes()
         }
     }
 
     @Before
     fun before() {
+        DebuggerTestAssertions.before()
         CommonPool.usePrivatePool()
         threadsBefore = currentThreads()
     }
@@ -145,6 +125,7 @@ open class TestBase {
     fun onCompletion() {
         error.get()?.let { throw it }
         check(actionIndex.get() == 0 || finished.get()) { "Expecting that 'finish(...)' was invoked, but it was not" }
+        DebuggerTestAssertions.onCompletion()
         CommonPool.shutdown(SHUTDOWN_TIMEOUT)
         DefaultExecutor.shutdown(SHUTDOWN_TIMEOUT)
         checkTestThreads(threadsBefore)

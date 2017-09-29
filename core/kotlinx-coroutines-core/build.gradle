@@ -17,6 +17,9 @@ test {
 }
 
 task lockFreedomTest(type: Test, dependsOn: testClasses) {
+    classpath = files(configurations.testRuntime,
+            sourceSets.main.output.classesDirs, //clear, untransformed classes
+            sourceSets.test.output.classesDirs)
     include '**/*LFTest.*'
 }
 test.dependsOn lockFreedomTest
