@@ -36,6 +36,11 @@
             <scope>test</scope>
             <classifier>tests</classifier>
         </dependency>
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-io-jvm</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
     </dependencies>
 
     <build>
