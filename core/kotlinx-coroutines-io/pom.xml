@@ -15,7 +15,7 @@
 
     <properties>
         <subdir>core</subdir>
-        <kotlinx.io.version>0.0.3</kotlinx.io.version>
+        <kotlinx.io.version>0.0.4</kotlinx.io.version>
     </properties>
 
     <dependencies>
