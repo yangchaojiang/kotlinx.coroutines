@@ -1,10 +1,6 @@
-buildscript {
-    ext.lincheck_version = '1.8.1'
-}
-
 dependencies {
-    testCompile "com.devexperts.lincheck:core:${lincheck_version}"
-    testCompile project(':kotlinx-coroutines-debug-test')
+    ext.lincheck_version = '1.8.1'
+    testCompile "com.devexperts.lincheck:core:$lincheck_version"
 }
 
 test {

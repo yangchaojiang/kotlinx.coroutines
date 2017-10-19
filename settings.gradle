@@ -1,4 +1,21 @@
-rootProject.name = 'kotlinx-coroutines'
+rootProject.name = 'kotlinx.coroutines'
+
+includeBuild ('debug/kotlinx-coroutines-debug') {
+    dependencySubstitution {
+        substitute module('org.jetbrains.kotlinx:kotlinx-coroutines-debug') with project(':')
+    }
+}
+includeBuild ('debug/kotlinx-coroutines-debug-gradle-plugin') {
+    dependencySubstitution {
+        substitute module('org.jetbrains.kotlinx:kotlinx-coroutines-debug-gradle-plugin') with project(':')
+    }
+}
+includeBuild ('debug/kotlinx-coroutines-debug-test') {
+    dependencySubstitution {
+        substitute module('org.jetbrains.kotlinx:kotlinx-coroutines-debug-test') with project(':')
+    }
+}
+
 include 'kotlinx-coroutines-core'
 include 'kotlinx-coroutines-io'
 
@@ -11,6 +28,7 @@ include 'kotlinx-coroutines-reactive'
 include 'kotlinx-coroutines-reactor'
 include 'kotlinx-coroutines-rx1'
 include 'kotlinx-coroutines-rx2'
+include 'kotlinx-coroutines-rx-example'
 
 include 'kotlinx-coroutines-android'
 include 'kotlinx-coroutines-javafx'
@@ -20,14 +38,8 @@ include 'benchmarks'
 include 'knit'
 include 'site'
 
-include 'kotlinx-coroutines-debug-agent'
-include 'kotlinx-coroutines-debug-manager'
-include 'kotlinx-coroutines-debug-test'
-include 'kotlinx-coroutines-debug-transformer'
-
 project(':kotlinx-coroutines-core').projectDir = file('core/kotlinx-coroutines-core')
 project(':kotlinx-coroutines-io').projectDir = file('core/kotlinx-coroutines-io')
-
 project(':kotlinx-coroutines-guava').projectDir = file('integration/kotlinx-coroutines-guava')
 project(':kotlinx-coroutines-jdk8').projectDir = file('integration/kotlinx-coroutines-jdk8')
 project(':kotlinx-coroutines-nio').projectDir = file('integration/kotlinx-coroutines-nio')
@@ -36,10 +48,7 @@ project(':kotlinx-coroutines-reactive').projectDir = file('reactive/kotlinx-coro
 project(':kotlinx-coroutines-reactor').projectDir = file('reactive/kotlinx-coroutines-reactor')
 project(':kotlinx-coroutines-rx1').projectDir = file('reactive/kotlinx-coroutines-rx1')
 project(':kotlinx-coroutines-rx2').projectDir = file('reactive/kotlinx-coroutines-rx2')
+project(':kotlinx-coroutines-rx-example').projectDir = file('reactive/kotlinx-coroutines-rx-example')
 project(':kotlinx-coroutines-android').projectDir = file('ui/kotlinx-coroutines-android')
 project(':kotlinx-coroutines-javafx').projectDir = file('ui/kotlinx-coroutines-javafx')
 project(':kotlinx-coroutines-swing').projectDir = file('ui/kotlinx-coroutines-swing')
-project(':kotlinx-coroutines-debug-agent').projectDir = file('debugger/kotlinx-coroutines-debug-agent')
-project(':kotlinx-coroutines-debug-manager').projectDir = file('debugger/kotlinx-coroutines-debug-manager')
-project(':kotlinx-coroutines-debug-test').projectDir = file('debugger/kotlinx-coroutines-debug-test')
-project(':kotlinx-coroutines-debug-transformer').projectDir = file('debugger/kotlinx-coroutines-debug-transformer')

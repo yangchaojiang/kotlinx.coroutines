@@ -4,18 +4,18 @@ allprojects {
 }
 
 buildscript {
-    ext.kotlin_version = '1.1.50'
+    ext.kotlin_version = '1.1.51'
     ext.junit_version = '4.12'
-    ext.atomicFU_version = '0.7-SNAPSHOT'
+    ext.atomicFU_version = '0.9'
     ext.dokka_version = '0.9.15'
     repositories {
         jcenter()
-        mavenLocal() //TODO: remove
     }
     dependencies {
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-        classpath "org.jetbrains.dokka:dokka-gradle-plugin:${dokka_version}"
+        classpath "org.jetbrains.dokka:dokka-gradle-plugin:$dokka_version"
         classpath "org.jetbrains.kotlinx:atomicfu-gradle-plugin:$atomicFU_version"
+        classpath "org.jetbrains.kotlinx:kotlinx-coroutines-debug-gradle-plugin"
     }
 }
 
@@ -23,6 +23,7 @@ subprojects {
     apply plugin: 'kotlin'
     apply plugin: 'org.jetbrains.dokka'
     apply plugin: 'kotlinx-atomicfu'
+    apply plugin: 'kotlinx-coroutines-debug'
 
     sourceCompatibility = 1.6
     targetCompatibility = 1.6
@@ -55,11 +56,9 @@ subprojects {
     }
 
     repositories {
-        mavenLocal() //TODO: remove
         jcenter()
         maven { url "http://jcenter.bintray.com" }
         maven { url "http://kotlin.bintray.com/kotlinx" }
-        maven { url "http://dl.bintray.com/kotlin/kotlin-eap" }
         maven { url "https://dl.bintray.com/devexperts/Maven/" }
     }
 
@@ -70,8 +69,14 @@ subprojects {
     }
 }
 
+def internal = ['benchmarks', 'knit', 'site']
+
 ext.skipClassesTransformation = { projectName ->
-    return ['benchmarks', 'knit', 'site'].contains(projectName) || projectName.startsWith('kotlinx-coroutines-debug')
+    return internal.contains(projectName)
+}
+
+ext.skipPublishing = { projectName ->
+    return (internal + 'kotlinx-coroutines-rx-example').contains(projectName)
 }
 
 subprojects {
@@ -82,8 +87,18 @@ subprojects {
             testCompileOnly "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
             testRuntime "org.jetbrains.kotlinx:atomicfu:$atomicFU_version"
 
-            testCompile project(':kotlinx-coroutines-debug-test')
-            testCompile project(':kotlinx-coroutines-debug-transformer') //for debuggerTransform* tasks
+            testCompile "org.jetbrains.kotlinx:kotlinx-coroutines-debug-test"
+        }
+    }
+
+    if (!skipPublishing(it.name)) {
+        apply plugin: 'maven-publish'
+        publishing {
+            publications {
+                mavenJava(MavenPublication) {
+                    from components.java
+                }
+            }
         }
     }
 }
@@ -91,37 +106,25 @@ subprojects {
 subprojects {
     if (skipClassesTransformation(project.name)) return
 
-    def CLASSES_AFTER_ATOMICFU_TRANSFORM = file("$buildDir/classes-atomicfu/main")
-    def MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/main")
-    def TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM = file("$buildDir/classes-debuggable/test")
-    def CLEAR_CLASSES_MAIN = sourceSets.main.output.classesDirs
-    def CLEAR_CLASSES_TEST = sourceSets.test.output.classesDirs
-
     atomicFU {
-        dependsOn classes
-        inputFiles = CLEAR_CLASSES_MAIN
-        outputDir = CLASSES_AFTER_ATOMICFU_TRANSFORM
+        inputFiles = sourceSets.main.output.classesDirs
+        outputDir = file("$buildDir/classes-atomicfu/main")
         classPath = sourceSets.main.runtimeClasspath
     }
 
-    task debuggerTransformMain(type: JavaExec) {
-        dependsOn atomicFU
-        classpath = sourceSets.test.compileClasspath
-        main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
-        args CLASSES_AFTER_ATOMICFU_TRANSFORM, MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM
+    task debuggerTransformMain(type: kotlinx.coroutines.debug.plugin.gradle.DebuggerTransformTask) {
+        inputFiles = atomicFU.outputs.files
+        outputDir = file("$buildDir/classes-debuggable/main")
     }
 
-    task debuggerTransformTest(type: JavaExec) {
-        dependsOn testClasses
-        classpath = sourceSets.test.compileClasspath
-        main = 'kotlinx.coroutines.debug.transformer.CoroutinesDebugTransformerKt'
-        args CLEAR_CLASSES_TEST.files.join(";"), TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM
+    task debuggerTransformTest(type: kotlinx.coroutines.debug.plugin.gradle.DebuggerTransformTask) {
+        inputFiles = sourceSets.test.output.classesDirs
+        outputDir = file("$buildDir/classes-debuggable/test")
     }
 
     task generateDebuggableSourcesJar(type: Jar) {
-        dependsOn debuggerTransformMain
         classifier = 'debuggable'
-        from files(MAIN_CLASSES_AFTER_DEBUGGER_TRANSFORM, sourceSets.main.output.resourcesDir)
+        from files(debuggerTransformMain.outputs, sourceSets.main.output.resourcesDir)
     }
 
     jar {
@@ -139,15 +142,13 @@ subprojects {
     }
 
     test {
-        classpath = files(configurations.testRuntime, atomicFU.outputs, CLEAR_CLASSES_TEST,
+        classpath = files(configurations.testRuntime, atomicFU.outputs, sourceSets.test.output.classesDirs,
                 sourceSets.main.output.resourcesDir)
     }
 
 
     task testWithDebugger(type: Test) {
         dependsOn configurations.debuggable //execute generateDebuggableSourcesJar for subprojects
-        dependsOn generateDebuggableSourcesJar
-        dependsOn debuggerTransformTest
 
         doFirst {
             //replace all dependencies on other projects classes with its debuggable(instrumented) classes
@@ -165,16 +166,12 @@ subprojects {
             def testCompileOnlyFiles = testCompileFiles - projectCompileFiles
 
             classpath = files(testCompileOnlyFiles, externalFiles, configurations.debuggable,
-                    generateDebuggableSourcesJar, TEST_CLASSES_AFTER_DEBUGGER_TRANSFORM)
+                    generateDebuggableSourcesJar, debuggerTransformTest.outputs)
 
             systemProperty "debug-agent-enabled", true
             systemProperty "debug-agent-log-level", "debug"
         }
     }
-}
-
-configure(subprojects.findAll { it.name.startsWith('kotlinx-coroutines-debug') }) { //don't run tests for debugger
-    test.exclude "**/*"
 }
 
 configure(subprojects.findAll { !skipClassesTransformation(it.name) && it.name != 'kotlinx-coroutines-core' }) {

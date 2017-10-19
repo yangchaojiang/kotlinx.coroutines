@@ -23,7 +23,6 @@ import kotlinx.coroutines.debug.test.DebuggerTestUtils
 import org.junit.After
 import org.junit.Before
 import org.junit.BeforeClass
-import java.net.URLClassLoader
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference

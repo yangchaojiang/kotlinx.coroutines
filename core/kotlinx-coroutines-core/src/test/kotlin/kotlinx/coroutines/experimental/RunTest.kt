@@ -16,7 +16,6 @@
 
 package kotlinx.coroutines.experimental
 
-import kotlinx.coroutines.debug.test.DebuggerTestAssertions
 import org.hamcrest.MatcherAssert.assertThat
 import org.hamcrest.core.IsEqual
 import org.junit.Test
@@ -43,12 +42,10 @@ class RunTest : TestBase() {
     fun testSameContextWithSuspend() = runBlocking<Unit> {
         expect(1)
         launch(coroutineContext) { // make sure there is not early dispatch here
-            DebuggerTestAssertions.expectNoCoroutines()
             expect(4)
         }
         expect(2)
         val result = run(coroutineContext) { // same context!
-            DebuggerTestAssertions.expectNoCoroutines()
             expect(3) // still here
             yield() // now yields to launch!
             expect(5)
