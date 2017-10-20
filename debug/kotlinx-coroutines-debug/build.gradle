@@ -29,6 +29,7 @@ allprojects {
 
 dependencies {
     compile project(':kotlinx-coroutines-debug-agent')
+    shadow "org.jetbrains.kotlin:kotlin-stdlib-jre8:$kotlin_version" //will be add to pom.xml when publish
 }
 
 jar.enabled = false //prevent `build` task from empty jar creation
@@ -36,19 +37,15 @@ jar.enabled = false //prevent `build` task from empty jar creation
 tasks.build.dependsOn shadowJar
 
 shadowJar {
-    //baseName = 'coroutines-debug-agent'
     classifier = null
 
     configurations = [project.configurations.compile]
 
     dependencies {
-        //include dependency('org.ow2.asm:asm-all:.*')
-        include dependency('org.jetbrains.asm:asm-all.*')
-        include dependency(':kotlinx-coroutines-debug.*') //such a regexp, very wow!
-        exclude dependency('org.jetbrains.kotlin:kotlin-stdlib-jre8')
+        include dependency('org.jetbrains.asm:asm-all.*') //from project(":kotlinx-coroutines-debug-transformer")
+        include dependency(':kotlinx-coroutines-debug.*')
     }
 
-    //relocate 'org.objectweb.asm', 'kotlinx.coroutines.debug.org.objectweb.asm'
     relocate 'org.jetbrains.org.objectweb.asm', 'kotlinx.coroutines.debug.org.objectweb.asm'
 }
 
