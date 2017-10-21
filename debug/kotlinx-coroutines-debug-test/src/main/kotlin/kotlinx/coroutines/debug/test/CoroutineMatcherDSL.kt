@@ -20,7 +20,7 @@ data class StackElement(val method: String?, val file: String? = null, val line:
 
 sealed class Status(status: String, additionalInfo: String = "") : RegexHolder(" {2}Status: $status $additionalInfo")
 data class Suspended(val atMethod: String? = null) : Status("Suspended", "at ${atMethod.p}")
-object Created : Status("Created")
+data class Created(val onThread: String? = null) : Status("Created", "on ${onThread.p}")
 data class Running(val onThread: String? = null) : Status("Running", "on ${onThread.p}")
 
 data class RegexStringMatcher(val string: String) : Matchable {
@@ -77,7 +77,7 @@ class Coroutine(val name: String, val status: Status) : FullStringMatcher() {
             oneOrMore(StackElement(method, file, line))
 }
 
-fun coroutine(name: String, status: Status, appendStack: Coroutine.() -> Unit): Coroutine {
+fun coroutine(name: String, status: Status, appendStack: Coroutine.() -> Unit = {}): Coroutine {
     val coroutine = Coroutine(name, status)
     coroutine.appendStack()
     return coroutine

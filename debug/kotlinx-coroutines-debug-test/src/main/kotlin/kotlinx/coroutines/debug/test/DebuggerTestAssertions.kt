@@ -1,24 +1,41 @@
 package kotlinx.coroutines.debug.test
 
 import kotlinx.coroutines.debug.manager.*
+import org.junit.After
 import org.junit.Assert
-import java.net.URLClassLoader
+import org.junit.Before
+import org.junit.BeforeClass
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 typealias CoroutineName = String
 typealias Dump = String
 
+open class DebuggerTestBase {
+    @Before
+    fun debuggableTestBefore() {
+        DebuggerTestAssertions.beforeTest()
+    }
+
+    @After
+    fun debuggableTestAfter() {
+        DebuggerTestAssertions.onCompletion()
+    }
+
+    companion object {
+        @JvmStatic
+        @BeforeClass
+        fun debuggableTestBeforeClass() {
+            DebuggerTestUtils.tryBuildDebuggerIndexes()
+        }
+    }
+}
+
 object DebuggerTestUtils {
     const val PROPERTY_ENABLE_DEBUG = "debug-agent-enabled"
     const val PROPERTY_LOG_LEVEL = "debug-agent-log-level"
     fun tryBuildDebuggerIndexes() {
         val classLoader = Thread.currentThread().contextClassLoader
-        debug { buildString {
-            append("all classpath:")
-            append((classLoader as URLClassLoader).urLs.joinToString("\n"))
-            append("------------------")
-        } }
         if (System.getProperty(PROPERTY_ENABLE_DEBUG).toBoolean()) {
             DebuggerTestAssertions.enabled = true
             val logLevel = try {
@@ -28,19 +45,19 @@ object DebuggerTestUtils {
             } ?: LogLevel.INFO
             Logger.config = LoggerConfig(logLevel)
             val suspendCallsIndex = classLoader.getResources(ALL_SUSPEND_CALLS_DUMP_FILE_NAME).toList()
-            info {"suspend calls indexes: ${suspendCallsIndex.toList()}" }
+            debug { "suspend calls indexes: ${suspendCallsIndex.toList()}" }
             allSuspendCallsMap.putAll(
                     suspendCallsIndex.flatMap {
                         it.openStream().bufferedReader().readLines().map { it.readKV(SuspendCall) }
                     })
             val doResumeFunctionsIndex = classLoader.getResources(KNOWND_DORESUME_FUNCTIONS_DUMP_FILE_NAME).toList()
-            info {"doResume functions indexes: ${doResumeFunctionsIndex.toList()}"}
+            debug { "doResume functions indexes: ${doResumeFunctionsIndex.toList()}" }
             knownDoResumeFunctionsMap.putAll(
                     doResumeFunctionsIndex.flatMap {
                         it.openStream().bufferedReader().readLines().map { it.readKV(MethodId) }
                     })
-            info { "suspend calls size: ${allSuspendCallsMap.size}" }
-            info { "do resume functions size: ${knownDoResumeFunctionsMap.size}"}
+            debug { "allSuspendCallsMap.size: ${allSuspendCallsMap.size}" }
+            debug { "knownDoResumeFunctionsMap.size: ${knownDoResumeFunctionsMap.size}" }
         }
     }
 }
@@ -52,8 +69,9 @@ object DebuggerTestAssertions {
         assertMatches(expected.toList(), extractFixedCoroutineDumpsAsInDebugger())
     }
 
-    fun before() {
+    fun beforeTest() {
         if (!enabled) return
+        resetCoroutineId()
         expectedStates.clear()
         StacksManager.reset()
         exceptions = AppendOnlyThreadSafeList()
@@ -80,12 +98,17 @@ object DebuggerTestAssertions {
         expectedStates[nextExpectedIndex.getAndIncrement()] = ExpectedState(coroutines.toList())
     }
 
+    private fun resetCoroutineId() {
+        Class.forName("kotlinx.coroutines.experimental.CoroutineContextKt")
+                .getDeclaredMethod("resetCoroutineId").invoke(null)
+    }
+
     private var stateIndex = AtomicInteger(0)
 
     private data class ExpectedState(val coroutines: List<Coroutine>)
 
     private val NAME_AND_STATUS_FROM_COROUTINE_DUMP =
-            "^\\\"(.+)\\\".*\n {2}Status:\\s([A-Za-z]+).*\n.*".toRegex(RegexOption.DOT_MATCHES_ALL)
+            "^\\\"(.+)\\\".*\n {2}Status:\\s([A-Za-z]+).*(\n.*)?".toRegex(RegexOption.DOT_MATCHES_ALL)
 
     private fun extractNameFromCoroutineDump(dump: String): String {
         val (_, name, _) = requireNotNull(NAME_AND_STATUS_FROM_COROUTINE_DUMP.find(dump)?.groupValues,
@@ -114,7 +137,7 @@ object DebuggerTestAssertions {
     }
 
     private fun likeInDebugTextStateDump(): String =
-            Class.forName("StacksManager")
+            Class.forName("kotlinx.coroutines.debug.manager.StacksManager")
                     .getDeclaredMethod("getFullDumpString").invoke(null) as String
 
     private fun assertMatches(expected: List<Coroutine>, actual: Map<CoroutineName, Dump>) {

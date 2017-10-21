@@ -18,11 +18,9 @@ package kotlinx.coroutines.experimental
 
 import guide.test.checkTestThreads
 import guide.test.currentThreads
-import kotlinx.coroutines.debug.test.DebuggerTestAssertions
-import kotlinx.coroutines.debug.test.DebuggerTestUtils
+import kotlinx.coroutines.debug.test.DebuggerTestBase
 import org.junit.After
 import org.junit.Before
-import org.junit.BeforeClass
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -46,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference
  * }
  * ```
  */
-open class TestBase {
+open class TestBase : DebuggerTestBase() {
     /**
      * Is `true` when nightly stress test is done.
      */
@@ -105,17 +103,8 @@ open class TestBase {
     private lateinit var threadsBefore: Set<Thread>
     private val SHUTDOWN_TIMEOUT = 10_000L // 10s at most to wait
 
-    companion object {
-        @JvmStatic
-        @BeforeClass
-        fun beforeClass() {
-            DebuggerTestUtils.tryBuildDebuggerIndexes()
-        }
-    }
-
     @Before
     fun before() {
-        DebuggerTestAssertions.before()
         CommonPool.usePrivatePool()
         threadsBefore = currentThreads()
     }
@@ -124,7 +113,6 @@ open class TestBase {
     fun onCompletion() {
         error.get()?.let { throw it }
         check(actionIndex.get() == 0 || finished.get()) { "Expecting that 'finish(...)' was invoked, but it was not" }
-        DebuggerTestAssertions.onCompletion()
         CommonPool.shutdown(SHUTDOWN_TIMEOUT)
         DefaultExecutor.shutdown(SHUTDOWN_TIMEOUT)
         checkTestThreads(threadsBefore)
